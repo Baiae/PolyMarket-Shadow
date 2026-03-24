@@ -1,0 +1,12 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    prefer_const_constructors: true
+    use_super_parameters: true
+    avoid_print: true
+    # Critical for a trading dashboard — prevents unawaited async calls
+    # that could cause silent race conditions in state management.
+    unawaited_futures: true
+    # Catches discarded Future results that could silently swallow errors.
+    discarded_futures: true
