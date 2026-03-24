@@ -1,0 +1,41 @@
+# Flutter Analyze — Dart static analysis for the dashboard
+# Runs on every push and PR that touches the flutter/ directory.
+
+name: Flutter Analyze
+
+on:
+  push:
+    paths:
+      - 'flutter/**'
+      - '.github/workflows/flutter-analyze.yml'
+  pull_request:
+    paths:
+      - 'flutter/**'
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.x'
+          channel: 'stable'
+          cache: true
+
+      - name: Get dependencies
+        run: |
+          cd flutter
+          flutter pub get
+
+      - name: Analyze (dart analyzer + lint rules)
+        run: |
+          cd flutter
+          flutter analyze --fatal-infos
+
+      - name: Check formatting
+        run: |
+          cd flutter
+          dart format --output=none --set-exit-if-changed lib/

@@ -1,0 +1,43 @@
+# Ruff + Pylint — Python agent code quality
+# Runs on every push and PR that touches the agent/ directory.
+# Ruff is fast; Pylint is thorough. Both catch different classes of issues.
+
+name: Python Lint
+
+on:
+  push:
+    paths:
+      - 'agent/**'
+      - '.github/workflows/python-lint.yml'
+  pull_request:
+    paths:
+      - 'agent/**'
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          cd agent
+          pip install -r requirements.txt
+
+      - name: Ruff (fast linting + import sorting)
+        run: |
+          cd agent
+          ruff check src/ --output-format=github
+
+      - name: Pylint (deep analysis)
+        run: |
+          cd agent
+          pylint src/ \
+            --disable=C0114,C0115,C0116 \
+            --fail-under=7.0

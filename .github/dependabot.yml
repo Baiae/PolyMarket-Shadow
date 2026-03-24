@@ -1,0 +1,44 @@
+# Dependabot — automatic dependency update PRs
+# Monitors both the Python agent and Flutter dashboard for outdated
+# or vulnerable packages and opens PRs automatically.
+
+version: 2
+updates:
+
+  # Python agent dependencies
+  - package-ecosystem: "pip"
+    directory: "/agent"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "python"
+    # Group all non-breaking updates into one PR to reduce noise
+    groups:
+      python-deps:
+        patterns:
+          - "*"
+
+  # Flutter dashboard dependencies
+  - package-ecosystem: "pub"
+    directory: "/flutter"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "flutter"
+    groups:
+      flutter-deps:
+        patterns:
+          - "*"
+
+  # GitHub Actions themselves — keep the workflow tools up to date
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+      - "github-actions"
