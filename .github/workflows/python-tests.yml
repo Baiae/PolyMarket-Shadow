@@ -1,13 +1,10 @@
-# Pytest — Python agent test suite
-# Currently a scaffold. Tests will populate agent/tests/ as the project matures.
-# The workflow runs immediately so you see the green check from day one.
-
 name: Python Tests
 
 on:
   push:
     paths:
       - 'agent/**'
+      - 'pytest.ini'
       - '.github/workflows/python-tests.yml'
   pull_request:
     paths:
@@ -24,6 +21,7 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
+          cache-dependency-path: 'agent/requirements.txt'
 
       - name: Install dependencies
         run: |
@@ -32,10 +30,10 @@ jobs:
           pip install pytest pytest-asyncio
 
       - name: Run tests
-        run: |
-          cd agent
-          pytest tests/ -v --tb=short || echo "No tests yet — scaffold ready"
+        run: pytest --tb=short -v
         env:
           PAPER_TRADING: "true"
           POLYMARKET_API_KEY: "test"
+          POLYMARKET_SECRET: "test"
+          POLYMARKET_PASSPHRASE: "test"
           OPENROUTER_API_KEY: "test"

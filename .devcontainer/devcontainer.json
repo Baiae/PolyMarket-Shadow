@@ -1,0 +1,31 @@
+{
+  "name": "Poly-Shadow Agent",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+  "workspaceFolder": "/workspaces/PolyMarket-Shadow",
+  "postCreateCommand": "cd agent && pip install -r requirements.txt && pip install pytest pytest-asyncio",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.black-formatter",
+        "charliermarsh.ruff",
+        "ms-python.pytest"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "editor.formatOnSave": true,
+        "[python]": { "editor.defaultFormatter": "ms-python.black-formatter" },
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["agent/tests"],
+        "python.testing.cwd": "${workspaceFolder}"
+      }
+    }
+  },
+  "forwardPorts": [8000],
+  "portsAttributes": {
+    "8000": { "label": "Agent API", "onAutoForward": "notify" }
+  }
+}
