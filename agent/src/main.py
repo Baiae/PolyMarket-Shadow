@@ -11,6 +11,7 @@ from strategy.swarm import AgentSwarm
 from risk import RiskManager
 from execution import ExecutionEngine
 from feedback_logger import FeedbackLogger
+from resolution_tracker import ResolutionTracker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,6 +34,7 @@ class AgentOrchestrator:
         self.swarm = AgentSwarm()
         self.execution = ExecutionEngine(self.risk)
         self.logger = FeedbackLogger()
+        self.resolution_tracker = ResolutionTracker()
 
     async def run(self) -> None:
         self.running = True
@@ -47,6 +49,7 @@ class AgentOrchestrator:
         async with asyncio.TaskGroup() as tg:
             tg.create_task(self.collector.start())
             tg.create_task(self._arb_scan_loop())
+            tg.create_task(self.resolution_tracker.run_loop())
 
     def stop(self) -> None:
         self.running = False
