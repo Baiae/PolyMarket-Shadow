@@ -28,6 +28,7 @@ from forecasting.collection import (  # noqa: E402
     load_provider_specs,
     parse_iso_datetime,
 )
+from forecasting.evidence_templates import TemplatedEvidenceManifest  # noqa: E402
 from forecasting.forecast import utc_now  # noqa: E402
 from forecasting.journal import ForecastJournal  # noqa: E402
 
@@ -156,7 +157,7 @@ async def run(args: argparse.Namespace) -> int:
             allow_market_metadata_only=args.allow_market_metadata_only,
         )
 
-    evidence_manifest = (
+    evidence_manifest = TemplatedEvidenceManifest(
         EvidenceManifest.from_path(args.evidence)
         if args.evidence is not None
         else EvidenceManifest.empty()

@@ -8,9 +8,12 @@ on:
       - 'agent/scripts/live_adapter_smoke.py'
       - 'agent/scripts/live_forecast_snapshot_smoke.py'
       - 'agent/scripts/live_resolution_snapshot_smoke.py'
+      - 'agent/scripts/live_evidence_template_smoke.py'
       - 'agent/src/forecasting/collection.py'
       - 'agent/src/forecasting/resolution.py'
+      - 'agent/src/forecasting/evidence_templates.py'
       - 'agent/tests/test_forecast_resolution_capture.py'
+      - 'agent/tests/test_evidence_templates.py'
       - '.github/workflows/live-adapter-smoke.yml'
   pull_request:
     branches:
@@ -19,9 +22,12 @@ on:
       - 'agent/scripts/live_adapter_smoke.py'
       - 'agent/scripts/live_forecast_snapshot_smoke.py'
       - 'agent/scripts/live_resolution_snapshot_smoke.py'
+      - 'agent/scripts/live_evidence_template_smoke.py'
       - 'agent/src/forecasting/collection.py'
       - 'agent/src/forecasting/resolution.py'
+      - 'agent/src/forecasting/evidence_templates.py'
       - 'agent/tests/test_forecast_resolution_capture.py'
+      - 'agent/tests/test_evidence_templates.py'
       - '.github/workflows/live-adapter-smoke.yml'
   workflow_dispatch:
 
@@ -31,7 +37,7 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
@@ -66,6 +72,12 @@ jobs:
           python scripts/live_resolution_snapshot_smoke.py \
             --market-count 3 \
             --output ../live-adapter-smoke/resolution-evidence.json
+
+      - name: Run read-only live market-specific evidence smoke
+        working-directory: agent
+        run: |
+          python scripts/live_evidence_template_smoke.py \
+            --output ../live-adapter-smoke/dynamic-evidence.json
 
       - name: Upload smoke evidence
         if: always()
