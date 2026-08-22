@@ -75,6 +75,7 @@ FastAPI local control/observation API
 - `ForecastExperiment`: bounded multi-provider research runner with failure isolation;
 - `ForecastJournal`: append-only SQLite requests/evidence/forecasts/failures/resolutions;
 - `LiveForecastCollector`: bounded live Gamma/CLOB/evidence collection without an execution dependency;
+- `ResolutionCapture`: bounded public-CLOB maturation of unresolved forecast conditions;
 - Brier score, log loss, reliability bins, expected calibration error, and market-baseline comparisons;
 - skill-weighted ensembles whose weights must come from measured Brier skill.
 
@@ -115,7 +116,7 @@ The API binds to `127.0.0.1:8000` by default.
 | `INITIAL_BANKROLL` | `1000` | Initial paper cash |
 | `DATABASE_PATH` | `data/poly_shadow.db` | Canonical trading state |
 | `FORECAST_DATABASE_PATH` | `data/forecasting.db` | Append-only forecasting research journal |
-| `POLYMARKET_CLOB_URL` | `https://clob.polymarket.com` | Public CLOB snapshots for forecast baselines |
+| `POLYMARKET_CLOB_URL` | `https://clob.polymarket.com` | Public CLOB snapshots and resolution reads |
 | `MARKET_DISCOVERY_LIMIT` | `50` | Gamma markets loaded at startup |
 | `MARKET_MAX_BOOK_AGE_MS` | `60000` | Stale-book rejection threshold |
 | `ARB_MIN_NET_PROFIT` | `0.01` | Minimum net paper arb profit |
@@ -210,6 +211,28 @@ Independent evidence is required by default. `--allow-market-metadata-only` exis
 
 Exit status is `0` when at least one forecast is recorded, `2` when no market snapshot could be collected, and `3` when snapshots were preserved but every provider failed. Failure exits do not erase the issuance/evidence record.
 
+## Automatic forecast resolution capture
+
+Unresolved forecast conditions can be matured from the public CLOB market state without entering the execution process:
+
+```bash
+cd agent
+python scripts/capture_resolutions.py --db data/forecasting.db
+```
+
+To keep checking unresolved conditions:
+
+```bash
+python scripts/capture_resolutions.py \
+  --db data/forecasting.db \
+  --watch \
+  --interval-seconds 300
+```
+
+Resolution is accepted only when the returned condition ID matches, the market is closed, the market exposes exactly YES and NO token records, and exactly one token has `winner=true`. Prices are never used to infer the winner. Resolved conditions are excluded from later polling, while HTTP/schema failures are isolated per condition.
+
+For polling/catch-up captures, the existing journal field `resolved_at` means **first authoritative resolved-state observation time**. It is not presented as an exact exchange event timestamp when that timestamp is unavailable from the snapshot API. See `docs/FORECAST_RESOLUTION_CAPTURE.md` for the full contract.
+
 ## Forecast evaluation
 
 After resolutions have been recorded in the forecast journal:
@@ -229,12 +252,11 @@ ruff check src/
 pylint src/ --disable=C0114,C0115,C0116 --fail-under=7.0
 ```
 
-The deterministic suite remains offline. The separate live workflow verifies both the public Gamma/WebSocket stream and the public CLOB batch-book path used to freeze forecasting baselines. Neither live smoke invokes a provider or an order path.
+The deterministic suite remains offline. The separate live workflow verifies the public Gamma/WebSocket stream, the public CLOB batch-book path used to freeze forecasting baselines, and authoritative winner state on closed markets. None of the live smokes invokes a provider or an order path.
 
 ## Remaining P1 work
 
-- accumulate resolved out-of-sample forecasting evidence;
-- collect resolutions into the research journal automatically;
+- accumulate enough resolved out-of-sample forecasting evidence for meaningful comparison;
 - evaluate whale-flow features as hypotheses rather than automatic signals;
 - migrate/requalify the Flutter dashboard;
 - lock dependencies and upgrade package families deliberately;
