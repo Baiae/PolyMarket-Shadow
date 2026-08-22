@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+import aiohttp
 import pytest
 
 from forecasting.forecast import ForecastRequest, ProbabilisticForecast, make_forecast_id
@@ -167,7 +168,7 @@ async def test_capture_isolates_external_failures():
     client = FakeResolutionClient(
         {
             "c1": market_payload("c1", no=True),
-            "c2": RuntimeError("network unavailable"),
+            "c2": aiohttp.ClientConnectionError("network unavailable"),
         }
     )
     summary = await ResolutionCapture(journal, client=client).capture_once(limit=10)
