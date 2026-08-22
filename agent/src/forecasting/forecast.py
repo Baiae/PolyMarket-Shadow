@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
 ZERO = Decimal(0)
@@ -17,7 +17,10 @@ def utc_now() -> datetime:
 
 
 def probability(value: Decimal | str | float | int) -> Decimal:
-    result = Decimal(str(value))
+    try:
+        result = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError(f"invalid probability: {value!r}") from exc
     if result < ZERO or result > ONE:
         raise ValueError(f"probability outside [0,1]: {result}")
     return result

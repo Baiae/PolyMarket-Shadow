@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     max_drawdown_pct: float = 0.30
     max_position_pct: float = 0.05
 
+    # P1 forecasting research state; deliberately separate from the trading ledger.
+    forecast_database_path: str = "data/forecasting.db"
+
     # API server: local control plane by default
     api_host: str = "127.0.0.1"
     api_port: int = 8000
@@ -36,11 +39,6 @@ class Settings(BaseSettings):
 
     # v0.2 invariant: false is rejected at runtime.
     paper_trading: bool = True
-
-    # Reserved for P1 forecasting; unused by the v0.2 trading runtime.
-    openrouter_api_key: str = Field(default="")
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    swarm_consensus_required: int = 4
 
 
 settings = Settings()

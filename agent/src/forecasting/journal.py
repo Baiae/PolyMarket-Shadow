@@ -1,4 +1,4 @@
-"""Append-only SQLite journal for forecasts, evidence provenance, and outcomes."""
+"""Append-only SQLite journal for requests, forecasts, provenance, and outcomes."""
 
 from __future__ import annotations
 
@@ -32,25 +32,34 @@ class ForecastJournal:
                 content_sha256 TEXT NOT NULL,
                 title TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS requests (
+                request_id TEXT PRIMARY KEY,
+                condition_id TEXT NOT NULL,
+                question TEXT NOT NULL,
+                resolves_at TEXT,
+                issued_at TEXT NOT NULL,
+                baseline_probability TEXT,
+                baseline_captured_at TEXT,
+                baseline_source TEXT,
+                baseline_best_bid TEXT,
+                baseline_best_ask TEXT
+            );
+            CREATE TABLE IF NOT EXISTS request_evidence (
+                request_id TEXT NOT NULL REFERENCES requests(request_id),
+                evidence_id TEXT NOT NULL REFERENCES evidence(evidence_id),
+                ordinal INTEGER NOT NULL,
+                PRIMARY KEY (request_id, evidence_id)
+            );
             CREATE TABLE IF NOT EXISTS forecasts (
                 forecast_id TEXT PRIMARY KEY,
-                request_id TEXT NOT NULL,
-                condition_id TEXT NOT NULL,
+                request_id TEXT NOT NULL REFERENCES requests(request_id),
                 provider TEXT NOT NULL,
                 model TEXT NOT NULL,
                 probability_yes TEXT NOT NULL,
                 uncertainty TEXT NOT NULL,
                 abstain INTEGER NOT NULL,
-                issued_at TEXT NOT NULL,
-                baseline_probability TEXT,
                 rationale TEXT NOT NULL,
                 metadata_json TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS forecast_evidence (
-                forecast_id TEXT NOT NULL REFERENCES forecasts(forecast_id),
-                evidence_id TEXT NOT NULL REFERENCES evidence(evidence_id),
-                ordinal INTEGER NOT NULL,
-                PRIMARY KEY (forecast_id, evidence_id)
             );
             CREATE TABLE IF NOT EXISTS resolutions (
                 condition_id TEXT PRIMARY KEY,
@@ -75,22 +84,31 @@ class ForecastJournal:
         )
 
     @staticmethod
+    def _request_values(request: ForecastRequest) -> tuple[object, ...]:
+        baseline = request.baseline
+        return (
+            request.request_id,
+            request.condition_id,
+            request.question,
+            request.resolves_at.isoformat() if request.resolves_at else "",
+            request.issued_at.isoformat(),
+            str(baseline.probability_yes) if baseline else "",
+            baseline.captured_at.isoformat() if baseline else "",
+            baseline.source if baseline else "",
+            str(baseline.best_bid) if baseline and baseline.best_bid is not None else "",
+            str(baseline.best_ask) if baseline and baseline.best_ask is not None else "",
+        )
+
+    @staticmethod
     def _forecast_values(forecast: ProbabilisticForecast) -> tuple[object, ...]:
         return (
             forecast.forecast_id,
             forecast.request_id,
-            forecast.condition_id,
             forecast.provider,
             forecast.model,
             str(forecast.probability_yes),
             str(forecast.uncertainty),
             int(forecast.abstain),
-            forecast.issued_at.isoformat(),
-            (
-                str(forecast.baseline_probability)
-                if forecast.baseline_probability is not None
-                else ""
-            ),
             forecast.rationale,
             json.dumps(
                 dict(forecast.metadata),
@@ -128,6 +146,65 @@ class ForecastJournal:
         if observed != values:
             raise ValueError(f"evidence_id {item.evidence_id!r} changed provenance")
 
+    def _ensure_request(self, request: ForecastRequest) -> None:
+        for item in request.evidence:
+            self._ensure_evidence(item)
+        values = self._request_values(request)
+        existing = self.connection.execute(
+            "SELECT * FROM requests WHERE request_id = ?",
+            (request.request_id,),
+        ).fetchone()
+        if existing is None:
+            self.connection.execute(
+                """
+                INSERT INTO requests (
+                    request_id, condition_id, question, resolves_at, issued_at,
+                    baseline_probability, baseline_captured_at, baseline_source,
+                    baseline_best_bid, baseline_best_ask
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                values,
+            )
+            self.connection.executemany(
+                """
+                INSERT INTO request_evidence (request_id, evidence_id, ordinal)
+                VALUES (?, ?, ?)
+                """,
+                [
+                    (request.request_id, item.evidence_id, ordinal)
+                    for ordinal, item in enumerate(request.evidence)
+                ],
+            )
+            return
+
+        observed = (
+            existing["request_id"],
+            existing["condition_id"],
+            existing["question"],
+            existing["resolves_at"] or "",
+            existing["issued_at"],
+            existing["baseline_probability"] or "",
+            existing["baseline_captured_at"] or "",
+            existing["baseline_source"] or "",
+            existing["baseline_best_bid"] or "",
+            existing["baseline_best_ask"] or "",
+        )
+        if observed != values:
+            raise ValueError(f"request_id {request.request_id!r} changed contents")
+        evidence_rows = self.connection.execute(
+            """
+            SELECT evidence_id
+            FROM request_evidence
+            WHERE request_id = ?
+            ORDER BY ordinal
+            """,
+            (request.request_id,),
+        ).fetchall()
+        observed_ids = tuple(row["evidence_id"] for row in evidence_rows)
+        expected_ids = tuple(item.evidence_id for item in request.evidence)
+        if observed_ids != expected_ids:
+            raise ValueError(f"request_id {request.request_id!r} changed evidence")
+
     def record_forecast(
         self,
         request: ForecastRequest,
@@ -148,8 +225,7 @@ class ForecastJournal:
 
         values = self._forecast_values(forecast)
         with self.connection:
-            for item in request.evidence:
-                self._ensure_evidence(item)
+            self._ensure_request(request)
             existing = self.connection.execute(
                 "SELECT * FROM forecasts WHERE forecast_id = ?",
                 (forecast.forecast_id,),
@@ -158,14 +234,11 @@ class ForecastJournal:
                 observed = (
                     existing["forecast_id"],
                     existing["request_id"],
-                    existing["condition_id"],
                     existing["provider"],
                     existing["model"],
                     existing["probability_yes"],
                     existing["uncertainty"],
                     existing["abstain"],
-                    existing["issued_at"],
-                    existing["baseline_probability"] or "",
                     existing["rationale"],
                     existing["metadata_json"],
                 )
@@ -178,22 +251,12 @@ class ForecastJournal:
             self.connection.execute(
                 """
                 INSERT INTO forecasts (
-                    forecast_id, request_id, condition_id, provider, model,
-                    probability_yes, uncertainty, abstain, issued_at,
-                    baseline_probability, rationale, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    forecast_id, request_id, provider, model,
+                    probability_yes, uncertainty, abstain,
+                    rationale, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 values,
-            )
-            self.connection.executemany(
-                """
-                INSERT INTO forecast_evidence (forecast_id, evidence_id, ordinal)
-                VALUES (?, ?, ?)
-                """,
-                [
-                    (forecast.forecast_id, item.evidence_id, ordinal)
-                    for ordinal, item in enumerate(request.evidence)
-                ],
             )
         return True
 
@@ -245,10 +308,12 @@ class ForecastJournal:
     ) -> list[tuple[ProbabilisticForecast, bool]]:
         rows = self.connection.execute(
             """
-            SELECT f.*, r.outcome_yes
+            SELECT f.*, q.condition_id, q.issued_at,
+                   q.baseline_probability, r.outcome_yes
             FROM forecasts AS f
+            JOIN requests AS q USING (request_id)
             JOIN resolutions AS r USING (condition_id)
-            ORDER BY f.issued_at, f.forecast_id
+            ORDER BY q.issued_at, f.forecast_id
             """
         ).fetchall()
         results: list[tuple[ProbabilisticForecast, bool]] = []
@@ -256,11 +321,11 @@ class ForecastJournal:
             evidence_rows = self.connection.execute(
                 """
                 SELECT evidence_id
-                FROM forecast_evidence
-                WHERE forecast_id = ?
+                FROM request_evidence
+                WHERE request_id = ?
                 ORDER BY ordinal
                 """,
-                (row["forecast_id"],),
+                (row["request_id"],),
             ).fetchall()
             baseline = (
                 row["baseline_probability"]

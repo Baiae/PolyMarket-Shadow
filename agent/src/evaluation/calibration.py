@@ -60,3 +60,16 @@ def reliability_bins(
             )
         )
     return results
+
+
+def expected_calibration_error(bins: list[CalibrationBin]) -> Decimal:
+    total = sum((item.count for item in bins), 0)
+    if total <= 0:
+        raise ValueError("at least one calibration sample is required")
+    return sum(
+        (
+            item.calibration_error * Decimal(item.count) / Decimal(total)
+            for item in bins
+        ),
+        ZERO,
+    )

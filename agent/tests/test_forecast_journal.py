@@ -22,7 +22,14 @@ def pair():
         retrieved_at=NOW,
         text="evidence",
     )
-    baseline = MarketBaseline("0xabc", "0.55", NOW, "book")
+    baseline = MarketBaseline(
+        "0xabc",
+        "0.55",
+        NOW,
+        "yes_orderbook_midpoint",
+        best_bid="0.54",
+        best_ask="0.56",
+    )
     request = ForecastRequest.create(
         request_id="r1",
         condition_id="0xabc",
@@ -54,6 +61,12 @@ def test_forecast_and_resolution_are_restart_safe(tmp_path: Path):
     first = ForecastJournal(str(path))
     assert first.record_forecast(request, forecast) is True
     assert first.record_forecast(request, forecast) is False
+    baseline_row = first.connection.execute(
+        "SELECT * FROM requests WHERE request_id = 'r1'"
+    ).fetchone()
+    assert baseline_row["baseline_source"] == "yes_orderbook_midpoint"
+    assert baseline_row["baseline_best_bid"] == "0.54"
+    assert baseline_row["baseline_best_ask"] == "0.56"
     assert first.record_resolution(
         condition_id="0xabc",
         outcome_yes=True,
