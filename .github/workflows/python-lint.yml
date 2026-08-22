@@ -30,6 +30,11 @@ jobs:
           cd agent
           pip install -r requirements.txt
 
+      - name: Ruff proposed import diff
+        run: |
+          cd agent
+          ruff check src/ --diff || true
+
       - name: Ruff (fast linting + import sorting)
         run: |
           cd agent
