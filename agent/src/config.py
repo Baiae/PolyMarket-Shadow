@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # Polymarket public data
     polymarket_ws_url: str = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
     polymarket_gamma_url: str = "https://gamma-api.polymarket.com"
+    polymarket_clob_url: str = "https://clob.polymarket.com"
     market_discovery_limit: int = 50
     market_max_book_age_ms: int = 60_000
 

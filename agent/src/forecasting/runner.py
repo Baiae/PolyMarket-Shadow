@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from .forecast import ForecastRequest, ProbabilisticForecast
+from .forecast import ForecastRequest, ProbabilisticForecast, utc_now
 from .journal import ForecastJournal
 from .provider import ForecastProvider
 
@@ -40,6 +40,7 @@ class ForecastExperiment:
         self.journal = journal
 
     async def run(self, request: ForecastRequest) -> ForecastRunResult:
+        self.journal.record_request(request)
         raw_results = await asyncio.gather(
             *(provider.forecast(request) for provider in self.providers),
             return_exceptions=True,
@@ -48,13 +49,22 @@ class ForecastExperiment:
         failures: list[ForecastFailure] = []
         for provider, result in zip(self.providers, raw_results):
             if isinstance(result, BaseException):
-                failures.append(
-                    ForecastFailure(
-                        provider=provider.provider_name,
-                        model=provider.model_name,
-                        error=f"{type(result).__name__}: {result}",
-                    )
+                if not isinstance(result, Exception):
+                    raise result
+                error = f"{type(result).__name__}: {result}"
+                failure = ForecastFailure(
+                    provider=provider.provider_name,
+                    model=provider.model_name,
+                    error=error,
                 )
+                self.journal.record_failure(
+                    request,
+                    provider=provider.provider_name,
+                    model=provider.model_name,
+                    error=error,
+                    recorded_at=utc_now(),
+                )
+                failures.append(failure)
                 continue
             self.journal.record_forecast(request, result)
             forecasts.append(result)

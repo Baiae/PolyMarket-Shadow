@@ -73,7 +73,8 @@ FastAPI local control/observation API
 - `ProbabilisticForecast`: explicit `probability_yes`, uncertainty, abstention, model identity, and provenance links;
 - `OpenAICompatibleForecastProvider`: local or remote OpenAI-compatible adapter with no fixed model roster;
 - `ForecastExperiment`: bounded multi-provider research runner with failure isolation;
-- `ForecastJournal`: append-only SQLite requests/evidence/forecasts/resolutions;
+- `ForecastJournal`: append-only SQLite requests/evidence/forecasts/failures/resolutions;
+- `LiveForecastCollector`: bounded live Gamma/CLOB/evidence collection without an execution dependency;
 - Brier score, log loss, reliability bins, expected calibration error, and market-baseline comparisons;
 - skill-weighted ensembles whose weights must come from measured Brier skill.
 
@@ -114,6 +115,7 @@ The API binds to `127.0.0.1:8000` by default.
 | `INITIAL_BANKROLL` | `1000` | Initial paper cash |
 | `DATABASE_PATH` | `data/poly_shadow.db` | Canonical trading state |
 | `FORECAST_DATABASE_PATH` | `data/forecasting.db` | Append-only forecasting research journal |
+| `POLYMARKET_CLOB_URL` | `https://clob.polymarket.com` | Public CLOB snapshots for forecast baselines |
 | `MARKET_DISCOVERY_LIMIT` | `50` | Gamma markets loaded at startup |
 | `MARKET_MAX_BOOK_AGE_MS` | `60000` | Stale-book rejection threshold |
 | `ARB_MIN_NET_PROFIT` | `0.01` | Minimum net paper arb profit |
@@ -140,6 +142,74 @@ Provider credentials/endpoints are supplied to forecasting research runners, not
 
 If `CONTROL_TOKEN` is set, control requests must also send it in `X-Poly-Shadow-Control-Token`.
 
+## Collecting out-of-sample forecast evidence
+
+The evidence collector is a separate operator command. It does not run inside `main.py` and cannot place orders.
+
+Create a provider configuration. Secrets are never stored in this file; only the name of an environment variable may be referenced. For an unauthenticated local OpenAI-compatible endpoint, set `api_key_required` to `false`:
+
+```json
+[
+  {
+    "provider_name": "local-openai-compatible",
+    "model_name": "your-model-id",
+    "base_url": "http://127.0.0.1:<port>/v1",
+    "api_key_env": "LOCAL_FORECAST_API_KEY",
+    "api_key_required": false,
+    "include_market_baseline": false
+  }
+]
+```
+
+For a remote provider, set `api_key_required` to `true` and export the named variable before collection. A literal `api_key` field is rejected.
+
+Create an evidence manifest. Keys may be a condition ID, Gamma market ID, market slug, or `*`. HTTP/HTTPS sources are fetched immediately before forecast issuance. Frozen operator-supplied text can be used by providing `content`. `published_at` is optional but, when supplied, must be timezone-aware and no later than retrieval time.
+
+```json
+{
+  "markets": {
+    "market-slug-or-condition-id": [
+      {
+        "source": "https://example.org/relevant-source",
+        "title": "Relevant source",
+        "published_at": "2026-08-22T12:00:00-07:00"
+      },
+      {
+        "source": "operator:frozen-note",
+        "title": "Frozen research note",
+        "content": "Fact pattern available before forecast issuance."
+      }
+    ]
+  }
+}
+```
+
+Run a bounded collection:
+
+```bash
+cd agent
+python scripts/collect_forecasts.py \
+  --providers providers.json \
+  --evidence evidence.json \
+  --sample-count 3 \
+  --db data/forecasting.db
+```
+
+For every accepted market the collector:
+
+1. discovers a trade-ready binary Gamma market;
+2. fetches both YES and NO books from the public CLOB batch endpoint;
+3. requires fresh, two-sided, identity-consistent snapshots;
+4. freezes the contemporaneous YES midpoint as the market baseline;
+5. freezes Gamma metadata and all configured evidence with retrieval timestamps and SHA-256 hashes;
+6. creates and journals the forecast request before invoking any model;
+7. invokes the configured forecasters with the market baseline hidden by default;
+8. journals successful forecasts and provider failures independently.
+
+Independent evidence is required by default. `--allow-market-metadata-only` exists only for bounded harness/debug work and should not be used to claim forecasting skill.
+
+Exit status is `0` when at least one forecast is recorded, `2` when no market snapshot could be collected, and `3` when snapshots were preserved but every provider failed. Failure exits do not erase the issuance/evidence record.
+
 ## Forecast evaluation
 
 After resolutions have been recorded in the forecast journal:
@@ -159,11 +229,12 @@ ruff check src/
 pylint src/ --disable=C0114,C0115,C0116 --fail-under=7.0
 ```
 
-The deterministic suite remains offline. The separate bounded live Gamma/WebSocket workflow verifies external market-data compatibility.
+The deterministic suite remains offline. The separate live workflow verifies both the public Gamma/WebSocket stream and the public CLOB batch-book path used to freeze forecasting baselines. Neither live smoke invokes a provider or an order path.
 
 ## Remaining P1 work
 
 - accumulate resolved out-of-sample forecasting evidence;
+- collect resolutions into the research journal automatically;
 - evaluate whale-flow features as hypotheses rather than automatic signals;
 - migrate/requalify the Flutter dashboard;
 - lock dependencies and upgrade package families deliberately;
