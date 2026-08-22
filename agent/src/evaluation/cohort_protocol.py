@@ -16,7 +16,6 @@ from .cohort import (
     CohortManifest,
     CohortQualificationReport,
     ForecasterQualification,
-    GateResult,
     QualificationPolicy,
     qualify_cohort,
 )
