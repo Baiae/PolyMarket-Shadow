@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 
 class MarketIdentityError(ValueError):
@@ -52,9 +53,9 @@ class MarketIdentity:
     category: str = ""
     end_date: str = ""
     fees_enabled: bool = False
-    fee_rate: Decimal = Decimal("0")
-    fee_exponent: Decimal = Decimal("1")
-    maker_rebate_rate: Decimal = Decimal("0")
+    fee_rate: Decimal = Decimal(0)
+    fee_exponent: Decimal = Decimal(1)
+    maker_rebate_rate: Decimal = Decimal(0)
     minimum_tick_size: Decimal | None = None
     minimum_order_size: Decimal | None = None
 
@@ -75,10 +76,14 @@ class MarketIdentity:
             return "YES"
         if token_id == self.no_token_id:
             return "NO"
-        raise KeyError(f"token {token_id!r} does not belong to market {self.gamma_market_id}")
+        raise KeyError(
+            f"token {token_id!r} does not belong to market {self.gamma_market_id}"
+        )
 
     @classmethod
-    def from_gamma(cls, market: Mapping[str, Any], *, event_id: str = "") -> "MarketIdentity":
+    def from_gamma(
+        cls, market: Mapping[str, Any], *, event_id: str = ""
+    ) -> MarketIdentity:
         gamma_id = str(market.get("id") or "").strip()
         condition_id = str(
             market.get("conditionId") or market.get("condition_id") or ""
@@ -96,9 +101,13 @@ class MarketIdentity:
             yes_obj = outcomes_obj.get("yes") or outcomes_obj.get("Yes") or {}
             no_obj = outcomes_obj.get("no") or outcomes_obj.get("No") or {}
             if isinstance(yes_obj, Mapping):
-                yes_token = str(yes_obj.get("tokenId") or yes_obj.get("token_id") or "").strip()
+                yes_token = str(
+                    yes_obj.get("tokenId") or yes_obj.get("token_id") or ""
+                ).strip()
             if isinstance(no_obj, Mapping):
-                no_token = str(no_obj.get("tokenId") or no_obj.get("token_id") or "").strip()
+                no_token = str(
+                    no_obj.get("tokenId") or no_obj.get("token_id") or ""
+                ).strip()
 
         if not yes_token or not no_token:
             token_ids = _as_list(
@@ -120,7 +129,6 @@ class MarketIdentity:
                 yes_token = yes_token or mapping.get("YES", "")
                 no_token = no_token or mapping.get("NO", "")
             else:
-                # Raw Gamma documents clobTokenIds in binary Yes/No order.
                 yes_token = yes_token or str(token_ids[0]).strip()
                 no_token = no_token or str(token_ids[1]).strip()
 
@@ -132,10 +140,16 @@ class MarketIdentity:
         category = str(market.get("category") or "").strip()
         if not category:
             tags = market.get("tags")
-            if isinstance(tags, Sequence) and not isinstance(tags, (str, bytes)) and tags:
+            if (
+                isinstance(tags, Sequence)
+                and not isinstance(tags, (str, bytes))
+                and tags
+            ):
                 first = tags[0]
                 if isinstance(first, Mapping):
-                    category = str(first.get("label") or first.get("name") or "").strip()
+                    category = str(
+                        first.get("label") or first.get("name") or ""
+                    ).strip()
                 else:
                     category = str(first).strip()
 
@@ -156,10 +170,14 @@ class MarketIdentity:
             yes_token_id=yes_token,
             no_token_id=no_token,
             question=question,
-            event_id=str(event_id or market.get("eventId") or market.get("event_id") or "").strip(),
+            event_id=str(
+                event_id or market.get("eventId") or market.get("event_id") or ""
+            ).strip(),
             slug=str(market.get("slug") or "").strip(),
             category=category,
-            end_date=str(market.get("endDate") or market.get("end_date") or "").strip(),
+            end_date=str(
+                market.get("endDate") or market.get("end_date") or ""
+            ).strip(),
             fees_enabled=bool(
                 market.get("feesEnabled")
                 if "feesEnabled" in market

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 
-ZERO = Decimal("0")
+ZERO = Decimal(0)
 
 
 def as_decimal(value: Any) -> Decimal:
@@ -23,10 +24,10 @@ class PriceLevel:
     size: Decimal
 
     @classmethod
-    def from_mapping(cls, value: Mapping[str, Any]) -> "PriceLevel":
+    def from_mapping(cls, value: Mapping[str, Any]) -> PriceLevel:
         price = as_decimal(value.get("price"))
         size = as_decimal(value.get("size"))
-        if price < ZERO or price > Decimal("1"):
+        if price < ZERO or price > Decimal(1):
             raise ValueError(f"prediction-market price outside [0,1]: {price}")
         if size < ZERO:
             raise ValueError(f"negative order-book size: {size}")
@@ -92,7 +93,9 @@ class OrderBook:
     ) -> None:
         self.bids = self._levels(bids)
         self.asks = self._levels(asks)
-        self.timestamp_ms = int(timestamp_ms) if timestamp_ms not in (None, "") else None
+        self.timestamp_ms = (
+            int(timestamp_ms) if timestamp_ms not in (None, "") else None
+        )
         self.hash = book_hash
 
     def apply_change(
@@ -105,19 +108,27 @@ class OrderBook:
         book_hash: str | None = None,
     ) -> None:
         normalized = side.strip().upper()
-        target = self.bids if normalized == "BUY" else self.asks if normalized == "SELL" else None
+        target = (
+            self.bids
+            if normalized == "BUY"
+            else self.asks
+            if normalized == "SELL"
+            else None
+        )
         if target is None:
             raise ValueError(f"unknown order side: {side!r}")
-        p = as_decimal(price)
-        s = as_decimal(size)
-        if p < ZERO or p > Decimal("1"):
-            raise ValueError(f"prediction-market price outside [0,1]: {p}")
-        if s < ZERO:
-            raise ValueError(f"negative order-book size: {s}")
-        if s == ZERO:
-            target.pop(p, None)
+        parsed_price = as_decimal(price)
+        parsed_size = as_decimal(size)
+        if parsed_price < ZERO or parsed_price > Decimal(1):
+            raise ValueError(
+                f"prediction-market price outside [0,1]: {parsed_price}"
+            )
+        if parsed_size < ZERO:
+            raise ValueError(f"negative order-book size: {parsed_size}")
+        if parsed_size == ZERO:
+            target.pop(parsed_price, None)
         else:
-            target[p] = s
+            target[parsed_price] = parsed_size
         if timestamp_ms not in (None, ""):
             self.timestamp_ms = int(timestamp_ms)
         if book_hash is not None:
@@ -146,7 +157,9 @@ class OrderBook:
         return FillQuote(requested, filled, notional, average, tuple(levels))
 
     @staticmethod
-    def _levels(values: Iterable[Mapping[str, Any]]) -> dict[Decimal, Decimal]:
+    def _levels(
+        values: Iterable[Mapping[str, Any]],
+    ) -> dict[Decimal, Decimal]:
         result: dict[Decimal, Decimal] = {}
         for value in values:
             level = PriceLevel.from_mapping(value)

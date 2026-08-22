@@ -32,7 +32,7 @@ class Position:
 
     @property
     def average_cost(self) -> Decimal:
-        return self.cost_basis / self.shares if self.shares else Decimal("0")
+        return self.cost_basis / self.shares if self.shares else Decimal(0)
 
 
 @dataclass(frozen=True, slots=True)
