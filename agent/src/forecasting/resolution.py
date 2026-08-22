@@ -129,6 +129,25 @@ def observe_resolution(
     )
 
 
+def unresolved_condition_ids(journal: ForecastJournal, *, limit: int) -> tuple[str, ...]:
+    """Return oldest forecasted conditions that have no recorded resolution."""
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    rows = journal.connection.execute(
+        """
+        SELECT q.condition_id, MIN(q.issued_at) AS first_issued
+        FROM requests AS q
+        LEFT JOIN resolutions AS r USING (condition_id)
+        WHERE r.condition_id IS NULL
+        GROUP BY q.condition_id
+        ORDER BY first_issued, q.condition_id
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return tuple(str(row["condition_id"]) for row in rows)
+
+
 class ResolutionCapture:
     """Matures unresolved forecast requests using public CLOB winner state."""
 
@@ -146,7 +165,7 @@ class ResolutionCapture:
         self.concurrency = concurrency
 
     async def capture_once(self, *, limit: int = 100) -> ResolutionCaptureSummary:
-        condition_ids = self.journal.unresolved_condition_ids(limit=limit)
+        condition_ids = unresolved_condition_ids(self.journal, limit=limit)
         semaphore = asyncio.Semaphore(self.concurrency)
 
         async def fetch(condition_id: str) -> tuple[str, object]:
