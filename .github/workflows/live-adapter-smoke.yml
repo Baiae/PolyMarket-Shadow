@@ -10,6 +10,7 @@ on:
       - 'agent/scripts/live_resolution_snapshot_smoke.py'
       - 'agent/src/forecasting/collection.py'
       - 'agent/src/forecasting/resolution.py'
+      - 'agent/tests/test_forecast_resolution_capture.py'
       - '.github/workflows/live-adapter-smoke.yml'
   pull_request:
     branches:
@@ -20,6 +21,7 @@ on:
       - 'agent/scripts/live_resolution_snapshot_smoke.py'
       - 'agent/src/forecasting/collection.py'
       - 'agent/src/forecasting/resolution.py'
+      - 'agent/tests/test_forecast_resolution_capture.py'
       - '.github/workflows/live-adapter-smoke.yml'
   workflow_dispatch:
 
