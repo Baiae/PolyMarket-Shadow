@@ -49,6 +49,11 @@ class PaperBroker:
             source=source,
         )
 
+    @staticmethod
+    def _meets_minimum_order(market: MarketIdentity, fill: Fill) -> bool:
+        minimum = market.minimum_order_size
+        return minimum is None or fill.gross_cost >= minimum
+
     def buy(
         self,
         *,
@@ -111,6 +116,17 @@ class PaperBroker:
                 "INSUFFICIENT_LIQUIDITY",
                 requested,
                 ZERO,
+            )
+        if not self._meets_minimum_order(market, fill):
+            return PaperOrderResult(
+                order_id,
+                "BELOW_MINIMUM_ORDER",
+                requested,
+                ZERO,
+                reason=(
+                    f"gross cost {fill.gross_cost} is below market minimum "
+                    f"{market.minimum_order_size}"
+                ),
             )
         if not self.ledger.reserve(order_id, fill.total_cost):
             return PaperOrderResult(
@@ -189,6 +205,17 @@ class PaperBroker:
                 "INSUFFICIENT_LIQUIDITY",
                 requested,
                 ZERO,
+            )
+            return rejected, rejected
+        if not self._meets_minimum_order(market, yes_fill) or not self._meets_minimum_order(
+            market, no_fill
+        ):
+            rejected = PaperOrderResult(
+                order_id,
+                "BELOW_MINIMUM_ORDER",
+                requested,
+                ZERO,
+                reason="one or both arb legs are below the market minimum order size",
             )
             return rejected, rejected
 

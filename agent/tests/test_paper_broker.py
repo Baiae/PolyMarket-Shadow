@@ -6,7 +6,7 @@ from domain.orderbook import OrderBook
 from paper_broker import PaperBroker
 
 
-def identity(*, fees=False):
+def identity(*, fees=False, minimum_order_size=None):
     return MarketIdentity(
         gamma_market_id="1",
         condition_id="0xabc",
@@ -15,6 +15,9 @@ def identity(*, fees=False):
         question="Test?",
         fees_enabled=fees,
         fee_rate=Decimal("0.04") if fees else Decimal("0"),
+        minimum_order_size=(
+            Decimal(str(minimum_order_size)) if minimum_order_size is not None else None
+        ),
     )
 
 
@@ -89,3 +92,17 @@ def test_fee_is_included_in_total_cost():
     assert result.status == "FILLED"
     assert result.fill.fee > 0
     assert result.fill.total_cost == result.fill.gross_cost + result.fill.fee
+
+
+def test_broker_rejects_order_below_market_minimum_notional():
+    ledger = Ledger(initial_cash="100")
+    result = PaperBroker(ledger).buy(
+        order_id="o1",
+        market=identity(minimum_order_size="5"),
+        side="YES",
+        shares="10",
+        book=book(),
+        source="TEST",
+    )
+    assert result.status == "BELOW_MINIMUM_ORDER"
+    assert ledger.cash == Decimal("100")

@@ -17,8 +17,18 @@ class GammaAdapter:
     def __init__(self, base_url: str | None = None):
         self.base_url = (base_url or settings.polymarket_gamma_url).rstrip("/")
 
+    @staticmethod
+    def is_trade_ready(market: dict[str, Any]) -> bool:
+        """Require explicit current Gamma flags before enabling paper execution."""
+        return (
+            market.get("active") is True
+            and market.get("closed") is False
+            and market.get("acceptingOrders") is True
+            and market.get("enableOrderBook") is True
+        )
+
     async def fetch_active_markets(self, *, limit: int = 500) -> list[MarketIdentity]:
-        """Fetch active markets and reject identities that cannot be proven."""
+        """Fetch active trade-ready markets and reject identities that cannot be proven."""
         params = {"active": "true", "closed": "false", "limit": str(limit)}
         timeout = aiohttp.ClientTimeout(total=20)
         async with (
@@ -31,7 +41,7 @@ class GammaAdapter:
         markets = payload if isinstance(payload, list) else payload.get("markets", [])
         identities: list[MarketIdentity] = []
         for market in markets:
-            if not isinstance(market, dict):
+            if not isinstance(market, dict) or not self.is_trade_ready(market):
                 continue
             event_id = ""
             events = market.get("events")

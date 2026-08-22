@@ -65,13 +65,36 @@ class Ledger:
             "INSERT OR IGNORE INTO metadata(key, value) VALUES('initial_cash', ?)",
             (str(initial_cash),),
         )
+        # Reservations represent in-process paper orders only. A process restart
+        # cannot have a genuine outstanding paper fill, so orphan locks are
+        # released rather than permanently reducing available cash.
+        self._db.execute("UPDATE reservations SET active=0 WHERE active=1")
+
+    def get_metadata(self, key: str, default: str | None = None) -> str | None:
+        row = self._db.execute(
+            "SELECT value FROM metadata WHERE key=?", (key,)
+        ).fetchone()
+        return row["value"] if row is not None else default
+
+    def set_metadata(self, key: str, value: str) -> None:
+        self._db.execute(
+            """INSERT INTO metadata(key, value) VALUES(?, ?)
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
+            (key, value),
+        )
+
+    def get_metadata_decimal(
+        self, key: str, default: Decimal | None = None
+    ) -> Decimal | None:
+        value = self.get_metadata(key)
+        return Decimal(value) if value is not None else default
 
     @property
     def initial_cash(self) -> Decimal:
-        row = self._db.execute(
-            "SELECT value FROM metadata WHERE key='initial_cash'"
-        ).fetchone()
-        return Decimal(row["value"])
+        value = self.get_metadata("initial_cash")
+        if value is None:
+            raise RuntimeError("ledger missing initial_cash metadata")
+        return Decimal(value)
 
     @property
     def cash(self) -> Decimal:
@@ -102,7 +125,8 @@ class Ledger:
         self._db.execute("BEGIN IMMEDIATE")
         try:
             if self._db.execute(
-                "SELECT 1 FROM reservations WHERE order_id=?", (order_id,)
+                "SELECT 1 FROM reservations WHERE order_id=? AND active=1",
+                (order_id,),
             ).fetchone():
                 self._db.execute("ROLLBACK")
                 return False
@@ -110,7 +134,8 @@ class Ledger:
                 self._db.execute("ROLLBACK")
                 return False
             self._db.execute(
-                "INSERT INTO reservations(order_id, amount, active) VALUES(?,?,1)",
+                """INSERT INTO reservations(order_id, amount, active) VALUES(?,?,1)
+                   ON CONFLICT(order_id) DO UPDATE SET amount=excluded.amount, active=1""",
                 (order_id, str(amount)),
             )
             self._db.execute("COMMIT")

@@ -41,6 +41,39 @@ def test_manual_kill_and_resume_use_public_methods():
     assert risk.is_killed is False
 
 
+def test_kill_state_survives_restart(tmp_path):
+    path = tmp_path / "risk.db"
+    ledger = Ledger(str(path), initial_cash="100")
+    risk = RiskManager(ledger)
+    risk.kill("operator")
+    ledger.close()
+
+    reopened = Ledger(str(path), initial_cash="100")
+    restored = RiskManager(reopened)
+    assert restored.is_killed is True
+    assert restored.kill_reason == "operator"
+    restored.resume()
+    reopened.close()
+
+    reopened_again = Ledger(str(path), initial_cash="100")
+    assert RiskManager(reopened_again).is_killed is False
+
+
+def test_peak_equity_survives_restart_for_drawdown_control(tmp_path):
+    path = tmp_path / "risk.db"
+    ledger = Ledger(str(path), initial_cash="100")
+    ledger.record_fill(fill())
+    risk = RiskManager(ledger, max_drawdown_pct="0.10")
+    assert risk.evaluate({"yes": Decimal("0.7")}) is False
+    assert risk.stats["peak_equity"] == "120.0"
+    ledger.close()
+
+    reopened = Ledger(str(path), initial_cash="100")
+    restored = RiskManager(reopened, max_drawdown_pct="0.10")
+    assert restored.evaluate({"yes": Decimal("0.5")}) is True
+    assert restored.stats["peak_equity"] == "120.0"
+
+
 def test_allocation_is_capped_by_equity_and_cash():
     ledger = Ledger(initial_cash="100")
     risk = RiskManager(ledger, max_position_pct="0.05")

@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 
 from openai import AsyncOpenAI
@@ -34,6 +34,10 @@ YES, NO, or NO_TRADE.
 - NO_TRADE: insufficient information or too close to call"""
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 @dataclass
 class ModelPrediction:
     model: str
@@ -53,7 +57,7 @@ class SwarmSignal:
     confidence: float
     yes_price: float = 0.5
     no_price: float = 0.5
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=_utc_now)
 
 
 class AgentSwarm:

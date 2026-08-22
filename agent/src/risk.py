@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from accounting.ledger import Ledger
@@ -29,11 +29,12 @@ class RiskManager:
             )
         )
         self.max_position_pct = Decimal(str(max_position_pct))
-        self._peak_equity = ledger.initial_cash
+        stored_peak = ledger.get_metadata_decimal("risk_peak_equity")
+        self._peak_equity = max(stored_peak or ledger.initial_cash, ledger.initial_cash)
         self._last_equity = ledger.initial_cash
         self._last_drawdown = ZERO
-        self._killed = False
-        self._kill_reason = ""
+        self._killed = ledger.get_metadata("risk_killed", "0") == "1"
+        self._kill_reason = ledger.get_metadata("risk_kill_reason", "") or ""
         self._kill_timestamp: datetime | None = None
         self._order_timestamps: list[datetime] = []
 
@@ -48,17 +49,25 @@ class RiskManager:
     def kill(self, reason: str) -> None:
         self._killed = True
         self._kill_reason = reason or "manually triggered"
-        self._kill_timestamp = datetime.now(timezone.utc)
+        self._kill_timestamp = datetime.now(UTC)
+        self.ledger.set_metadata("risk_killed", "1")
+        self.ledger.set_metadata("risk_kill_reason", self._kill_reason)
 
     def resume(self) -> None:
         self._killed = False
         self._kill_reason = ""
         self._kill_timestamp = None
+        self.ledger.set_metadata("risk_killed", "0")
+        self.ledger.set_metadata("risk_kill_reason", "")
 
     def evaluate(self, mark_prices: Mapping[str, Decimal]) -> bool:
         equity = self.ledger.equity(mark_prices)
         self._last_equity = equity
-        self._peak_equity = max(self._peak_equity, equity)
+        if equity > self._peak_equity:
+            self._peak_equity = equity
+            self.ledger.set_metadata("risk_peak_equity", str(equity))
+        elif self.ledger.get_metadata("risk_peak_equity") is None:
+            self.ledger.set_metadata("risk_peak_equity", str(self._peak_equity))
         if self._peak_equity > ZERO:
             self._last_drawdown = (
                 self._peak_equity - equity
@@ -85,7 +94,7 @@ class RiskManager:
     def can_place_order(self) -> bool:
         if self._killed:
             return False
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         self._order_timestamps = [
             timestamp
             for timestamp in self._order_timestamps

@@ -54,6 +54,21 @@ def test_reservation_reduces_available_cash():
     assert ledger.available_cash == Decimal("100")
 
 
+def test_restart_clears_orphan_reservation_but_preserves_fill_idempotency(tmp_path):
+    path = tmp_path / "ledger.db"
+    ledger = Ledger(str(path), initial_cash="100")
+    assert ledger.record_fill(fill()) is True
+    assert ledger.reserve("orphan", Decimal("20")) is True
+    ledger.close()
+
+    reopened = Ledger(str(path), initial_cash="999")
+    assert reopened.initial_cash == Decimal("100")
+    assert reopened.reserved_cash == 0
+    assert reopened.available_cash == Decimal("96.0")
+    assert reopened.record_fill(fill()) is False
+    assert reopened.cash == Decimal("96.0")
+
+
 def test_resolution_settles_once_and_realizes_pnl():
     ledger = Ledger(initial_cash="100")
     ledger.record_fill(fill())
@@ -75,6 +90,30 @@ def test_resolution_settles_once_and_realizes_pnl():
         event_key="resolution-duplicate",
     ) is False
     assert ledger.cash == Decimal("106.0")
+
+
+def test_resolution_idempotency_survives_restart(tmp_path):
+    path = tmp_path / "ledger.db"
+    ledger = Ledger(str(path), initial_cash="100")
+    ledger.record_fill(fill())
+    assert ledger.settle(
+        condition_id="0xabc",
+        winning_token_id="yes",
+        winning_outcome="YES",
+        timestamp_ms=2,
+        event_key="resolution-1",
+    ) is True
+    ledger.close()
+
+    reopened = Ledger(str(path), initial_cash="100")
+    assert reopened.settle(
+        condition_id="0xabc",
+        winning_token_id="yes",
+        winning_outcome="YES",
+        timestamp_ms=3,
+        event_key="resolution-2",
+    ) is False
+    assert reopened.cash == Decimal("106.0")
 
 
 def test_open_equity_requires_marks():
