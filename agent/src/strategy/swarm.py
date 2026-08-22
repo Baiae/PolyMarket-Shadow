@@ -6,6 +6,7 @@ from datetime import datetime
 from enum import Enum
 
 from openai import AsyncOpenAI
+
 from config import settings
 
 log = logging.getLogger(__name__)
@@ -56,6 +57,8 @@ class SwarmSignal:
 
 
 class AgentSwarm:
+    """Legacy v0.1 forecasting experiment; not on the v0.2 trading path."""
+
     def __init__(self):
         self._client = AsyncOpenAI(
             api_key=settings.openrouter_api_key,
@@ -75,7 +78,7 @@ class AgentSwarm:
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for meta, result in zip(metas, results):
             if isinstance(result, Exception):
-                log.error(f"Swarm error for {meta.market_id}: {result}")
+                log.error("Swarm error for %s: %s", meta.market_id, result)
                 continue
             if result is not None:
                 actionable.append(result)
@@ -91,44 +94,76 @@ class AgentSwarm:
             f"Category: {meta.category} | Resolves: {meta.end_date}"
         )
         raw_results = await asyncio.gather(
-            *[self._query_model(m, prompt) for m in SWARM_MODELS],
+            *[self._query_model(model, prompt) for model in SWARM_MODELS],
             return_exceptions=True,
         )
         predictions = []
         for model, result in zip(SWARM_MODELS, raw_results):
             if isinstance(result, Exception):
-                predictions.append(ModelPrediction(model=model,
-                    verdict=Verdict.NO_TRADE, latency_ms=0))
+                predictions.append(
+                    ModelPrediction(
+                        model=model,
+                        verdict=Verdict.NO_TRADE,
+                        latency_ms=0,
+                    )
+                )
             else:
                 predictions.append(result)
-        yes_count = sum(1 for p in predictions if p.verdict == Verdict.YES)
-        no_count  = sum(1 for p in predictions if p.verdict == Verdict.NO)
-        nt_count  = sum(1 for p in predictions if p.verdict == Verdict.NO_TRADE)
+        yes_count = sum(
+            1 for prediction in predictions if prediction.verdict == Verdict.YES
+        )
+        no_count = sum(
+            1 for prediction in predictions if prediction.verdict == Verdict.NO
+        )
+        nt_count = sum(
+            1
+            for prediction in predictions
+            if prediction.verdict == Verdict.NO_TRADE
+        )
         total = len(predictions)
         if yes_count >= settings.swarm_consensus_required:
             consensus, confidence = Verdict.YES, yes_count / total
         elif no_count >= settings.swarm_consensus_required:
             consensus, confidence = Verdict.NO, no_count / total
         else:
-            log.info(f"No consensus: {meta.question[:50]} (Y={yes_count} N={no_count})")
+            log.info(
+                "No consensus: %s (Y=%d N=%d)",
+                meta.question[:50],
+                yes_count,
+                no_count,
+            )
             return None
         signal = SwarmSignal(
-            market_id=meta.market_id, question=meta.question,
-            predictions=predictions, yes_count=yes_count,
-            no_count=no_count, no_trade_count=nt_count,
-            consensus=consensus, confidence=confidence,
-            yes_price=meta.yes_price, no_price=meta.no_price,
+            market_id=meta.market_id,
+            question=meta.question,
+            predictions=predictions,
+            yes_count=yes_count,
+            no_count=no_count,
+            no_trade_count=nt_count,
+            consensus=consensus,
+            confidence=confidence,
+            yes_price=meta.yes_price,
+            no_price=meta.no_price,
         )
-        log.info(f"✅ Consensus: {consensus.value} ({yes_count}/{total}) | {meta.question[:50]}")
+        log.info(
+            "Consensus: %s (%d/%d) | %s",
+            consensus.value,
+            yes_count,
+            total,
+            meta.question[:50],
+        )
         return signal
 
     async def _query_model(self, model: str, prompt: str) -> ModelPrediction:
         start = time.perf_counter()
         response = await self._client.chat.completions.create(
             model=model,
-            messages=[{"role": "system", "content": SYSTEM_PROMPT},
-                      {"role": "user", "content": prompt}],
-            max_tokens=5, temperature=0.1,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=5,
+            temperature=0.1,
         )
         latency_ms = (time.perf_counter() - start) * 1000
         raw = response.choices[0].message.content.strip().upper()

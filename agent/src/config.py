@@ -34,12 +34,13 @@ class Settings(BaseSettings):
     # Logging
     log_dir: str = "logs"
 
-    # v0.2 invariant: retained for compatibility but false is rejected at runtime.
+    # v0.2 invariant: false is rejected at runtime.
     paper_trading: bool = True
 
-    # Reserved for P1 forecasting; unused by the v0.2 paper core.
+    # Reserved for P1 forecasting; unused by the v0.2 trading runtime.
     openrouter_api_key: str = Field(default="")
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    swarm_consensus_required: int = 4
 
 
 settings = Settings()

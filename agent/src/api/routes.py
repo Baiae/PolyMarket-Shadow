@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from decimal import Decimal
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
@@ -79,7 +78,11 @@ def build_router(orchestrator) -> APIRouter:
     @router.get("/healthz", response_model=HealthStatus, tags=["health"])
     async def health_check():
         return HealthStatus(
-            status="healthy" if orchestrator.running and orchestrator.feed_healthy else "degraded",
+            status=(
+                "healthy"
+                if orchestrator.running and orchestrator.feed_healthy
+                else "degraded"
+            ),
             timestamp=datetime.now(timezone.utc).isoformat(),
             feed_healthy=orchestrator.feed_healthy,
             last_error=orchestrator.last_error,
@@ -101,26 +104,29 @@ def build_router(orchestrator) -> APIRouter:
 
     @router.get("/trades", response_model=list[TradeItem], tags=["data"])
     async def get_trades(limit: int = 50):
-        result = []
-        for trade in reversed(orchestrator.recent_trades[-max(0, min(limit, 500)):]):
-            result.append(TradeItem(
+        bounded_limit = max(0, min(limit, 500))
+        return [
+            TradeItem(
                 condition_id=trade.condition_id,
                 token_id=trade.token_id,
                 price=str(trade.price),
                 size=str(trade.size) if trade.size is not None else None,
                 side=trade.side,
                 fee_rate_bps=(
-                    str(trade.fee_rate_bps) if trade.fee_rate_bps is not None else None
+                    str(trade.fee_rate_bps)
+                    if trade.fee_rate_bps is not None
+                    else None
                 ),
                 timestamp_ms=trade.timestamp_ms,
-            ))
-        return result
+            )
+            for trade in reversed(orchestrator.recent_trades[-bounded_limit:])
+        ]
 
     @router.get("/signals", response_model=list[SignalItem], tags=["signals"])
     async def get_signals(limit: int = 50):
-        result = []
-        for signal in reversed(orchestrator.arbitrage.signals[-max(0, min(limit, 500)):]):
-            result.append(SignalItem(
+        bounded_limit = max(0, min(limit, 500))
+        return [
+            SignalItem(
                 condition_id=signal.condition_id,
                 question=signal.question,
                 matched_shares=str(signal.matched_shares),
@@ -129,23 +135,25 @@ def build_router(orchestrator) -> APIRouter:
                 net_profit=str(signal.net_profit),
                 roi=str(signal.roi),
                 timestamp_ms=max(
-                    signal.yes_book_timestamp_ms, signal.no_book_timestamp_ms
+                    signal.yes_book_timestamp_ms,
+                    signal.no_book_timestamp_ms,
                 ),
-            ))
-        return result
+            )
+            for signal in reversed(orchestrator.arbitrage.signals[-bounded_limit:])
+        ]
 
     @router.get("/positions", response_model=list[PositionItem], tags=["execution"])
     async def get_positions():
         return [
             PositionItem(
-                condition_id=p.condition_id,
-                token_id=p.token_id,
-                side=p.side,
-                shares=str(p.shares),
-                cost_basis=str(p.cost_basis),
-                average_cost=str(p.average_cost),
+                condition_id=position.condition_id,
+                token_id=position.token_id,
+                side=position.side,
+                shares=str(position.shares),
+                cost_basis=str(position.cost_basis),
+                average_cost=str(position.average_cost),
             )
-            for p in orchestrator.ledger.positions()
+            for position in orchestrator.ledger.positions()
         ]
 
     @router.post("/kill", response_model=KillResponse, tags=["control"])

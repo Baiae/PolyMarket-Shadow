@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from collections.abc import Mapping
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Mapping
 
 from accounting.ledger import Ledger
 from config import settings
 
 
-ZERO = Decimal("0")
+ZERO = Decimal(0)
 
 
 class RiskManager:
@@ -22,9 +22,13 @@ class RiskManager:
         max_position_pct: Decimal | str = "0.05",
     ):
         self.ledger = ledger
-        self.max_drawdown_pct = Decimal(str(
-            settings.max_drawdown_pct if max_drawdown_pct is None else max_drawdown_pct
-        ))
+        self.max_drawdown_pct = Decimal(
+            str(
+                settings.max_drawdown_pct
+                if max_drawdown_pct is None
+                else max_drawdown_pct
+            )
+        )
         self.max_position_pct = Decimal(str(max_position_pct))
         self._peak_equity = ledger.initial_cash
         self._last_equity = ledger.initial_cash
@@ -45,7 +49,7 @@ class RiskManager:
     def kill(self, reason: str) -> None:
         self._killed = True
         self._kill_reason = reason or "manually triggered"
-        self._kill_timestamp = datetime.utcnow()
+        self._kill_timestamp = datetime.now(timezone.utc)
 
     def resume(self) -> None:
         self._killed = False
@@ -55,20 +59,24 @@ class RiskManager:
     def evaluate(self, mark_prices: Mapping[str, Decimal]) -> bool:
         equity = self.ledger.equity(mark_prices)
         self._last_equity = equity
-        if equity > self._peak_equity:
-            self._peak_equity = equity
+        self._peak_equity = max(self._peak_equity, equity)
         if self._peak_equity > ZERO:
-            self._last_drawdown = (self._peak_equity - equity) / self._peak_equity
+            self._last_drawdown = (
+                self._peak_equity - equity
+            ) / self._peak_equity
         else:
             self._last_drawdown = ZERO
         if self._last_drawdown >= self.max_drawdown_pct and not self._killed:
             self.kill(
                 f"Drawdown {self._last_drawdown:.1%} exceeded "
-                f"{self.max_drawdown_pct:.0%}; peak={self._peak_equity}, equity={equity}"
+                f"{self.max_drawdown_pct:.0%}; "
+                f"peak={self._peak_equity}, equity={equity}"
             )
         return self._killed
 
-    def can_allocate(self, cost: Decimal, mark_prices: Mapping[str, Decimal]) -> bool:
+    def can_allocate(
+        self, cost: Decimal, mark_prices: Mapping[str, Decimal]
+    ) -> bool:
         if cost <= ZERO or self.evaluate(mark_prices):
             return False
         if cost > self.ledger.available_cash:
@@ -78,10 +86,11 @@ class RiskManager:
     def can_place_order(self) -> bool:
         if self._killed:
             return False
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         self._order_timestamps = [
-            t for t in self._order_timestamps
-            if (now - t).total_seconds() < 60
+            timestamp
+            for timestamp in self._order_timestamps
+            if (now - timestamp).total_seconds() < 60
         ]
         if len(self._order_timestamps) >= 60:
             return False
