@@ -1,0 +1,12 @@
+{
+  "cohort_id": "fq-v1-example",
+  "dedicated_journal": true,
+  "forecasters": [
+    {
+      "model": "your-model-id",
+      "provider": "local-openai-compatible"
+    }
+  ],
+  "policy_id": "PS-FQ-1",
+  "started_at": "2026-08-22T20:00:00+00:00"
+}
