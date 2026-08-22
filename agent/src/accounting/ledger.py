@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import sqlite3
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from domain.orders import Fill, Position
 
 
-ZERO = Decimal("0")
+ZERO = Decimal(0)
 
 
 class Ledger:
@@ -69,7 +69,9 @@ class Ledger:
 
     @property
     def initial_cash(self) -> Decimal:
-        row = self._db.execute("SELECT value FROM metadata WHERE key='initial_cash'").fetchone()
+        row = self._db.execute(
+            "SELECT value FROM metadata WHERE key='initial_cash'"
+        ).fetchone()
         return Decimal(row["value"])
 
     @property
@@ -82,9 +84,12 @@ class Ledger:
     @property
     def reserved_cash(self) -> Decimal:
         return sum(
-            (Decimal(row["amount"]) for row in self._db.execute(
-                "SELECT amount FROM reservations WHERE active=1"
-            )),
+            (
+                Decimal(row["amount"])
+                for row in self._db.execute(
+                    "SELECT amount FROM reservations WHERE active=1"
+                )
+            ),
             ZERO,
         )
 
@@ -116,15 +121,24 @@ class Ledger:
             raise
 
     def release(self, order_id: str) -> None:
-        self._db.execute("UPDATE reservations SET active=0 WHERE order_id=?", (order_id,))
+        self._db.execute(
+            "UPDATE reservations SET active=0 WHERE order_id=?", (order_id,)
+        )
 
     @staticmethod
     def _fill_row(fill: Fill) -> tuple[object, ...]:
         return (
-            f"fill:{fill.fill_id}", "BUY", str(-fill.total_cost),
-            fill.condition_id, fill.token_id, fill.side,
-            str(fill.filled_shares), str(fill.average_price), str(fill.fee),
-            fill.source, fill.timestamp_ms,
+            f"fill:{fill.fill_id}",
+            "BUY",
+            str(-fill.total_cost),
+            fill.condition_id,
+            fill.token_id,
+            fill.side,
+            str(fill.filled_shares),
+            str(fill.average_price),
+            str(fill.fee),
+            fill.source,
+            fill.timestamp_ms,
         )
 
     def record_fill(self, fill: Fill) -> bool:
@@ -160,17 +174,27 @@ class Ledger:
             raise
 
     def positions(self) -> list[Position]:
-        resolved = {row["condition_id"] for row in self._db.execute("SELECT condition_id FROM resolutions")}
-        grouped: dict[tuple[str, str, str], list[Decimal]] = defaultdict(lambda: [ZERO, ZERO])
+        resolved = {
+            row["condition_id"]
+            for row in self._db.execute("SELECT condition_id FROM resolutions")
+        }
+        grouped: dict[tuple[str, str, str], list[Decimal]] = defaultdict(
+            lambda: [ZERO, ZERO]
+        )
         for row in self._db.execute(
-            "SELECT condition_id, token_id, side, shares, cash_delta FROM ledger_entries WHERE entry_type='BUY'"
+            """SELECT condition_id, token_id, side, shares, cash_delta
+               FROM ledger_entries WHERE entry_type='BUY'"""
         ):
             if row["condition_id"] in resolved:
                 continue
             key = (row["condition_id"], row["token_id"], row["side"])
             grouped[key][0] += Decimal(row["shares"])
             grouped[key][1] += -Decimal(row["cash_delta"])
-        return [Position(k[0], k[1], k[2], v[0], v[1]) for k, v in grouped.items() if v[0] > ZERO]
+        return [
+            Position(k[0], k[1], k[2], v[0], v[1])
+            for k, v in grouped.items()
+            if v[0] > ZERO
+        ]
 
     def settle(
         self,
@@ -192,7 +216,8 @@ class Ledger:
                 (
                     Decimal(row["shares"])
                     for row in self._db.execute(
-                        "SELECT token_id, shares FROM ledger_entries WHERE entry_type='BUY' AND condition_id=?",
+                        """SELECT token_id, shares FROM ledger_entries
+                           WHERE entry_type='BUY' AND condition_id=?""",
                         (condition_id,),
                     )
                     if row["token_id"] == winning_token_id
@@ -200,8 +225,16 @@ class Ledger:
                 ZERO,
             )
             self._db.execute(
-                "INSERT INTO resolutions(condition_id,event_key,winning_token_id,winning_outcome,timestamp_ms) VALUES(?,?,?,?,?)",
-                (condition_id, event_key, winning_token_id, winning_outcome, timestamp_ms),
+                """INSERT INTO resolutions(
+                    condition_id,event_key,winning_token_id,winning_outcome,timestamp_ms
+                ) VALUES(?,?,?,?,?)""",
+                (
+                    condition_id,
+                    event_key,
+                    winning_token_id,
+                    winning_outcome,
+                    timestamp_ms,
+                ),
             )
             self._db.execute(
                 """INSERT INTO ledger_entries(
@@ -209,9 +242,17 @@ class Ledger:
                     side, shares, price, fee, source, timestamp_ms
                 ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    f"settlement:{event_key}", "SETTLEMENT", str(winning_shares),
-                    condition_id, winning_token_id, winning_outcome,
-                    str(winning_shares), "1", "0", "RESOLUTION", timestamp_ms,
+                    f"settlement:{event_key}",
+                    "SETTLEMENT",
+                    str(winning_shares),
+                    condition_id,
+                    winning_token_id,
+                    winning_outcome,
+                    str(winning_shares),
+                    "1",
+                    "0",
+                    "RESOLUTION",
+                    timestamp_ms,
                 ),
             )
             self._db.execute("COMMIT")
@@ -227,7 +268,8 @@ class Ledger:
             spent = ZERO
             payout = ZERO
             for row in self._db.execute(
-                "SELECT entry_type,cash_delta FROM ledger_entries WHERE condition_id=?",
+                """SELECT entry_type,cash_delta FROM ledger_entries
+                   WHERE condition_id=?""",
                 (resolution["condition_id"],),
             ):
                 delta = Decimal(row["cash_delta"])
@@ -242,7 +284,9 @@ class Ledger:
         value = self.cash
         for position in self.positions():
             if position.token_id not in mark_prices:
-                raise ValueError(f"missing mark price for open token {position.token_id}")
+                raise ValueError(
+                    f"missing mark price for open token {position.token_id}"
+                )
             value += position.shares * Decimal(str(mark_prices[position.token_id]))
         return value
 
