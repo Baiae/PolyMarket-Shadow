@@ -179,7 +179,12 @@ class ResolutionCapture:
                         source=f"{self.client.base_url}/markets/{{condition_id}}",
                     )
                     return condition_id, observation
-                except Exception as exc:  # isolated external-contract failure
+                except (
+                    aiohttp.ClientError,
+                    asyncio.TimeoutError,
+                    TypeError,
+                    ValueError,
+                ) as exc:
                     return condition_id, exc
 
         results = await asyncio.gather(*(fetch(condition_id) for condition_id in condition_ids))
