@@ -1,12 +1,18 @@
 {
   "cohort_id": "fq-v1-example",
   "dedicated_journal": true,
+  "decision_condition_count": 120,
+  "evidence_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "forecast_protocol_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
   "forecasters": [
     {
       "model": "your-model-id",
       "provider": "local-openai-compatible"
     }
   ],
+  "max_resolution_horizon_days": 90,
   "policy_id": "PS-FQ-1",
+  "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "provider_config_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "started_at": "2026-08-22T20:00:00+00:00"
 }
