@@ -9,7 +9,6 @@ from decimal import Decimal
 from accounting.ledger import Ledger
 from config import settings
 
-
 ZERO = Decimal(0)
 
 

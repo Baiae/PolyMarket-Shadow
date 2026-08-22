@@ -10,7 +10,6 @@ from pathlib import Path
 
 from domain.orders import Fill, Position
 
-
 ZERO = Decimal(0)
 
 

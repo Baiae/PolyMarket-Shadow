@@ -31,7 +31,6 @@ from resolution import ResolutionService
 from risk import RiskManager
 from strategy.arbitrage import ExecutableArbitrageDetector
 
-
 Path(settings.log_dir).mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,

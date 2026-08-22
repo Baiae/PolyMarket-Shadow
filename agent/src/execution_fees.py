@@ -6,7 +6,6 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from domain.market import MarketIdentity
 
-
 FEE_QUANTUM = Decimal("0.00001")
 ZERO = Decimal(0)
 ONE = Decimal(1)

@@ -9,7 +9,6 @@ from domain.market import MarketIdentity
 from domain.orderbook import OrderBook
 from execution_fees import taker_fee
 
-
 ZERO = Decimal(0)
 
 

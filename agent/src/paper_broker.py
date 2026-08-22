@@ -10,7 +10,6 @@ from domain.orderbook import OrderBook, as_decimal
 from domain.orders import Fill, PaperOrderResult
 from execution_fees import taker_fee
 
-
 ZERO = Decimal(0)
 
 
