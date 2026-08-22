@@ -29,6 +29,21 @@ def test_normalizes_current_raw_book_event():
     assert event.timestamp_ms == 1782753357257
 
 
+def test_replays_live_book_pair_captured_2026_08_22():
+    fixture = load("live_book_pair_2026-08-22.json")
+    identity = fixture["gamma_market"]
+    events = [normalize_market_event(raw) for raw in fixture["book_events"]]
+
+    assert all(isinstance(event, BookEvent) for event in events)
+    assert {event.condition_id for event in events} == {identity["condition_id"]}
+    assert {event.token_id for event in events} == {
+        identity["yes_token_id"],
+        identity["no_token_id"],
+    }
+    assert all(event.timestamp_ms == 1787424054186 for event in events)
+    assert all(event.bids and event.asks for event in events)
+
+
 def test_normalizes_current_price_change_event():
     event = normalize_market_event(load("price_change.json"))
     assert isinstance(event, PriceChangeEvent)
