@@ -1,0 +1,65 @@
+{
+  "book_events": [
+    {
+      "asks": [
+        {"price": "0.999", "size": "11002045.82"},
+        {"price": "0.998", "size": "500422.4"},
+        {"price": "0.997", "size": "2010013.32"},
+        {"price": "0.996", "size": "1001425.77"},
+        {"price": "0.995", "size": "358.6"}
+      ],
+      "asset_id": "107064985435494333113391038470401719113272800530429703182710416066774068907304",
+      "bids": [
+        {"price": "0.001", "size": "2063922.02"},
+        {"price": "0.002", "size": "500025"},
+        {"price": "0.003", "size": "112595.99"},
+        {"price": "0.005", "size": "1000"},
+        {"price": "0.006", "size": "20000"}
+      ],
+      "event_type": "book",
+      "hash": "4e7b4df3acd273457ec61238491d3cd15064a220",
+      "last_trade_price": "0.783",
+      "market": "0xe6bcc2f1dd025ce5e1833190f7c60a71171c94f805df55b9ab0ded695ec93565",
+      "tick_size": "0.001",
+      "timestamp": "1787424054186"
+    },
+    {
+      "asks": [
+        {"price": "0.999", "size": "2063922.02"},
+        {"price": "0.998", "size": "500025"},
+        {"price": "0.997", "size": "112595.99"},
+        {"price": "0.995", "size": "1000"},
+        {"price": "0.994", "size": "20000"}
+      ],
+      "asset_id": "65176072261324737856085688071627118509549293922582857186996392180609764586527",
+      "bids": [
+        {"price": "0.001", "size": "11002045.82"},
+        {"price": "0.002", "size": "500422.4"},
+        {"price": "0.003", "size": "2010013.32"},
+        {"price": "0.004", "size": "1001425.77"},
+        {"price": "0.005", "size": "358.6"}
+      ],
+      "event_type": "book",
+      "hash": "6be8179f23f02ac7563a150ec101367b789890d1",
+      "last_trade_price": "0.783",
+      "market": "0xe6bcc2f1dd025ce5e1833190f7c60a71171c94f805df55b9ab0ded695ec93565",
+      "tick_size": "0.001",
+      "timestamp": "1787424054186"
+    }
+  ],
+  "captured_at_utc": "2026-08-22T18:40:56Z",
+  "gamma_market": {
+    "condition_id": "0xe6bcc2f1dd025ce5e1833190f7c60a71171c94f805df55b9ab0ded695ec93565",
+    "event_id": "30829",
+    "fee_exponent": "1",
+    "fee_rate": "0.04",
+    "fees_enabled": true,
+    "gamma_market_id": "559653",
+    "maker_rebate_rate": "0.25",
+    "minimum_order_size": "5",
+    "minimum_tick_size": "0.001",
+    "no_token_id": "65176072261324737856085688071627118509549293922582857186996392180609764586527",
+    "yes_token_id": "107064985435494333113391038470401719113272800530429703182710416066774068907304"
+  },
+  "source": "GitHub Actions live read-only smoke run 32591439430"
+}
