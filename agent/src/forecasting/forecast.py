@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Iterable
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
@@ -16,7 +16,7 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def probability(value: Decimal | str | float | int) -> Decimal:
+def probability(value: Decimal | str | float) -> Decimal:
     try:
         result = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError) as exc:
@@ -33,7 +33,7 @@ def _aware(value: datetime) -> datetime:
 
 
 def make_forecast_id(request_id: str, provider: str, model: str) -> str:
-    raw = f"{request_id}\x1f{provider}\x1f{model}".encode("utf-8")
+    raw = f"{request_id}\x1f{provider}\x1f{model}".encode()
     return hashlib.sha256(raw).hexdigest()[:24]
 
 
@@ -58,7 +58,7 @@ class EvidenceItem:
             if self.published_at > self.retrieved_at:
                 raise ValueError("evidence cannot be published after retrieval")
         digest = self.content_sha256.lower()
-        expected = hashlib.sha256(self.content.encode("utf-8")).hexdigest()
+        expected = hashlib.sha256(self.content.encode()).hexdigest()
         if digest != expected:
             raise ValueError("content_sha256 does not match evidence content")
 
@@ -73,7 +73,7 @@ class EvidenceItem:
         published_at: datetime | None = None,
         title: str = "",
     ) -> EvidenceItem:
-        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(text.encode()).hexdigest()
         return cls(
             evidence_id=evidence_id,
             source=source,
