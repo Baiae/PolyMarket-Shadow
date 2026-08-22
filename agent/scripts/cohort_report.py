@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Monitor a pre-registered out-of-sample forecast qualification cohort."""
+"""Monitor a pre-registered fixed out-of-sample forecast qualification cohort."""
 
 from __future__ import annotations
 
@@ -18,7 +18,10 @@ SRC_DIR = AGENT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from evaluation.cohort import CohortManifest, qualify_cohort  # noqa: E402
+from evaluation.cohort_protocol import (  # noqa: E402
+    QualificationManifest,
+    qualify_fixed_cohort,
+)
 from forecasting.journal import ForecastJournal  # noqa: E402
 
 
@@ -37,13 +40,18 @@ def jsonable(value: Any) -> Any:
 
 
 def render_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
-    manifest = CohortManifest.from_path(args.cohort)
+    manifest = QualificationManifest.from_path(args.cohort)
     journal = ForecastJournal(str(args.db))
     try:
-        report = qualify_cohort(journal, manifest)
+        report = qualify_fixed_cohort(journal, manifest)
     finally:
         journal.close()
-    payload = jsonable(report)
+    payload = {
+        "qualification_manifest_sha256": manifest.sha256,
+        "decision_condition_count": manifest.decision_condition_count,
+        "max_resolution_horizon_days": manifest.max_resolution_horizon_days,
+        "report": jsonable(report),
+    }
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(
@@ -75,7 +83,7 @@ async def run(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Report fixed-policy cohort skill, calibration, coverage and slices."
+        description="Report fixed-sample cohort skill, calibration, coverage and slices."
     )
     parser.add_argument("--cohort", type=Path, required=True)
     parser.add_argument(
