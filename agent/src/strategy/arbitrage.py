@@ -10,7 +10,7 @@ from domain.orderbook import OrderBook
 from execution_fees import taker_fee
 
 
-ZERO = Decimal("0")
+ZERO = Decimal(0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +40,9 @@ class ExecutableArbitrageDetector:
         slippage_reserve_per_share: Decimal | str = "0",
     ):
         self.minimum_net_profit = Decimal(str(minimum_net_profit))
-        self.slippage_reserve_per_share = Decimal(str(slippage_reserve_per_share))
+        self.slippage_reserve_per_share = Decimal(
+            str(slippage_reserve_per_share)
+        )
         self.signals: list[ArbOpportunity] = []
 
     @staticmethod
@@ -60,8 +62,13 @@ class ExecutableArbitrageDetector:
         *,
         max_shares: Decimal | str | None = None,
     ) -> ArbOpportunity | None:
-        if yes_book.token_id != market.yes_token_id or no_book.token_id != market.no_token_id:
-            raise ValueError("order books do not match market YES/NO token identities")
+        if (
+            yes_book.token_id != market.yes_token_id
+            or no_book.token_id != market.no_token_id
+        ):
+            raise ValueError(
+                "order books do not match market YES/NO token identities"
+            )
         if yes_book.timestamp_ms is None or no_book.timestamp_ms is None:
             return None
 
@@ -74,7 +81,9 @@ class ExecutableArbitrageDetector:
             return None
 
         candidates = {depth_cap}
-        for value in self._cumulative_depth(yes_book) + self._cumulative_depth(no_book):
+        for value in self._cumulative_depth(yes_book) + self._cumulative_depth(
+            no_book
+        ):
             if ZERO < value <= depth_cap:
                 candidates.add(value)
 
@@ -85,11 +94,17 @@ class ExecutableArbitrageDetector:
             if not yes_quote.complete or not no_quote.complete:
                 continue
             yes_fee = sum(
-                (taker_fee(level.shares, level.price, market) for level in yes_quote.levels),
+                (
+                    taker_fee(level.shares, level.price, market)
+                    for level in yes_quote.levels
+                ),
                 ZERO,
             )
             no_fee = sum(
-                (taker_fee(level.shares, level.price, market) for level in no_quote.levels),
+                (
+                    taker_fee(level.shares, level.price, market)
+                    for level in no_quote.levels
+                ),
                 ZERO,
             )
             fees = yes_fee + no_fee
@@ -125,5 +140,4 @@ class ExecutableArbitrageDetector:
         return best
 
 
-# Deliberate compatibility name while main.py migrates in the next v0.2 commit.
 ArbitrageDetector = ExecutableArbitrageDetector

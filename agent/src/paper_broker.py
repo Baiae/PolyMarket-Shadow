@@ -11,6 +11,9 @@ from domain.orders import Fill, PaperOrderResult
 from execution_fees import taker_fee
 
 
+ZERO = Decimal(0)
+
+
 class PaperBroker:
     def __init__(self, ledger: Ledger):
         self.ledger = ledger
@@ -30,7 +33,7 @@ class PaperBroker:
             return None
         fee = sum(
             (taker_fee(level.shares, level.price, market) for level in quote.levels),
-            Decimal("0"),
+            ZERO,
         )
         return Fill(
             fill_id=fill_id,
@@ -62,14 +65,38 @@ class PaperBroker:
         normalized_side = side.strip().upper()
         expected_token = market.token_for_side(normalized_side)
         if book.token_id != expected_token:
-            return PaperOrderResult(order_id, "REJECTED", requested, Decimal("0"), reason="order book token mismatch")
+            return PaperOrderResult(
+                order_id,
+                "REJECTED",
+                requested,
+                ZERO,
+                reason="order book token mismatch",
+            )
         if book.timestamp_ms is None:
-            return PaperOrderResult(order_id, "REJECTED", requested, Decimal("0"), reason="book has no freshness timestamp")
+            return PaperOrderResult(
+                order_id,
+                "REJECTED",
+                requested,
+                ZERO,
+                reason="book has no freshness timestamp",
+            )
         quote = book.quote_buy(requested)
-        if quote.filled_shares <= 0:
-            return PaperOrderResult(order_id, "NO_LIQUIDITY", requested, Decimal("0"), reason="no executable asks")
+        if quote.filled_shares <= ZERO:
+            return PaperOrderResult(
+                order_id,
+                "NO_LIQUIDITY",
+                requested,
+                ZERO,
+                reason="no executable asks",
+            )
         if require_full_fill and not quote.complete:
-            return PaperOrderResult(order_id, "INSUFFICIENT_LIQUIDITY", requested, Decimal("0"), reason=f"only {quote.filled_shares} shares available")
+            return PaperOrderResult(
+                order_id,
+                "INSUFFICIENT_LIQUIDITY",
+                requested,
+                ZERO,
+                reason=f"only {quote.filled_shares} shares available",
+            )
         actual_requested = requested if require_full_fill else quote.filled_shares
         fill = self._build_fill(
             fill_id=order_id,
@@ -80,13 +107,30 @@ class PaperBroker:
             source=source,
         )
         if fill is None:
-            return PaperOrderResult(order_id, "INSUFFICIENT_LIQUIDITY", requested, Decimal("0"))
+            return PaperOrderResult(
+                order_id,
+                "INSUFFICIENT_LIQUIDITY",
+                requested,
+                ZERO,
+            )
         if not self.ledger.reserve(order_id, fill.total_cost):
-            return PaperOrderResult(order_id, "INSUFFICIENT_CASH", requested, Decimal("0"), reason="paper cash below executable cost")
+            return PaperOrderResult(
+                order_id,
+                "INSUFFICIENT_CASH",
+                requested,
+                ZERO,
+                reason="paper cash below executable cost",
+            )
         try:
             if not self.ledger.record_fill(fill):
-                return PaperOrderResult(order_id, "DUPLICATE", requested, Decimal("0"))
-            return PaperOrderResult(order_id, "FILLED", requested, fill.filled_shares, fill=fill)
+                return PaperOrderResult(order_id, "DUPLICATE", requested, ZERO)
+            return PaperOrderResult(
+                order_id,
+                "FILLED",
+                requested,
+                fill.filled_shares,
+                fill=fill,
+            )
         finally:
             self.ledger.release(order_id)
 
@@ -101,38 +145,87 @@ class PaperBroker:
         source: str = "ARB",
     ) -> tuple[PaperOrderResult, PaperOrderResult]:
         """Atomically paper-buy equal YES and NO share counts."""
-
         requested = as_decimal(shares)
-        if yes_book.token_id != market.yes_token_id or no_book.token_id != market.no_token_id:
-            rejected = PaperOrderResult(order_id, "REJECTED", requested, Decimal("0"), reason="pair book token mismatch")
+        if (
+            yes_book.token_id != market.yes_token_id
+            or no_book.token_id != market.no_token_id
+        ):
+            rejected = PaperOrderResult(
+                order_id,
+                "REJECTED",
+                requested,
+                ZERO,
+                reason="pair book token mismatch",
+            )
             return rejected, rejected
         if yes_book.timestamp_ms is None or no_book.timestamp_ms is None:
-            rejected = PaperOrderResult(order_id, "REJECTED", requested, Decimal("0"), reason="pair book missing timestamp")
+            rejected = PaperOrderResult(
+                order_id,
+                "REJECTED",
+                requested,
+                ZERO,
+                reason="pair book missing timestamp",
+            )
             return rejected, rejected
 
         yes_fill = self._build_fill(
-            fill_id=f"{order_id}:YES", market=market, side="YES",
-            requested=requested, book=yes_book, source=source,
+            fill_id=f"{order_id}:YES",
+            market=market,
+            side="YES",
+            requested=requested,
+            book=yes_book,
+            source=source,
         )
         no_fill = self._build_fill(
-            fill_id=f"{order_id}:NO", market=market, side="NO",
-            requested=requested, book=no_book, source=source,
+            fill_id=f"{order_id}:NO",
+            market=market,
+            side="NO",
+            requested=requested,
+            book=no_book,
+            source=source,
         )
         if yes_fill is None or no_fill is None:
-            rejected = PaperOrderResult(order_id, "INSUFFICIENT_LIQUIDITY", requested, Decimal("0"))
+            rejected = PaperOrderResult(
+                order_id,
+                "INSUFFICIENT_LIQUIDITY",
+                requested,
+                ZERO,
+            )
             return rejected, rejected
 
         total_cost = yes_fill.total_cost + no_fill.total_cost
         if not self.ledger.reserve(order_id, total_cost):
-            rejected = PaperOrderResult(order_id, "INSUFFICIENT_CASH", requested, Decimal("0"))
+            rejected = PaperOrderResult(
+                order_id,
+                "INSUFFICIENT_CASH",
+                requested,
+                ZERO,
+            )
             return rejected, rejected
         try:
             if not self.ledger.record_fills_atomic([yes_fill, no_fill]):
-                duplicate = PaperOrderResult(order_id, "DUPLICATE", requested, Decimal("0"))
+                duplicate = PaperOrderResult(
+                    order_id,
+                    "DUPLICATE",
+                    requested,
+                    ZERO,
+                )
                 return duplicate, duplicate
             return (
-                PaperOrderResult(order_id, "FILLED", requested, requested, fill=yes_fill),
-                PaperOrderResult(order_id, "FILLED", requested, requested, fill=no_fill),
+                PaperOrderResult(
+                    order_id,
+                    "FILLED",
+                    requested,
+                    requested,
+                    fill=yes_fill,
+                ),
+                PaperOrderResult(
+                    order_id,
+                    "FILLED",
+                    requested,
+                    requested,
+                    fill=no_fill,
+                ),
             )
         finally:
             self.ledger.release(order_id)

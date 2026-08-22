@@ -22,6 +22,7 @@ from adapters.polymarket.models import (
     PriceChangeEvent,
 )
 from adapters.polymarket.stream import PolymarketStream
+from api.server import create_app
 from config import settings
 from domain.market import MarketIdentity
 from domain.orderbook import OrderBook
@@ -53,7 +54,8 @@ class AgentOrchestrator:
     ):
         if not settings.paper_trading:
             raise RuntimeError(
-                "Poly-Shadow v0.2 has no live-capital execution mode; PAPER_TRADING must remain true"
+                "Poly-Shadow v0.2 has no live-capital execution mode; "
+                "PAPER_TRADING must remain true"
             )
         self.running = False
         self.last_error = ""
@@ -67,7 +69,9 @@ class AgentOrchestrator:
         self.ledger = Ledger(
             ledger_path or settings.database_path,
             initial_cash=(
-                str(settings.initial_bankroll) if initial_cash is None else initial_cash
+                str(settings.initial_bankroll)
+                if initial_cash is None
+                else initial_cash
             ),
         )
         self.risk = RiskManager(
@@ -106,7 +110,9 @@ class AgentOrchestrator:
             )
             self.load_markets(markets)
             if not self.markets_by_condition:
-                raise RuntimeError("Gamma discovery returned no complete binary markets")
+                raise RuntimeError(
+                    "Gamma discovery returned no complete binary markets"
+                )
             token_ids = list(self.token_to_condition)
             self.stream = PolymarketStream(token_ids, self.handle_event)
             log.info(
@@ -138,8 +144,14 @@ class AgentOrchestrator:
             if book is None:
                 return
             book.apply_snapshot(
-                bids=[{"price": str(x.price), "size": str(x.size)} for x in event.bids],
-                asks=[{"price": str(x.price), "size": str(x.size)} for x in event.asks],
+                bids=[
+                    {"price": str(level.price), "size": str(level.size)}
+                    for level in event.bids
+                ],
+                asks=[
+                    {"price": str(level.price), "size": str(level.size)}
+                    for level in event.asks
+                ],
                 timestamp_ms=event.timestamp_ms,
                 book_hash=event.book_hash,
             )
@@ -168,8 +180,6 @@ class AgentOrchestrator:
                 self.recent_trades = self.recent_trades[-500:]
 
         elif isinstance(event, BestBidAskEvent):
-            # Top-of-book events are retained for feed health/marking context;
-            # executable depth continues to come only from book state.
             condition = self.token_to_condition.get(event.token_id)
             if condition:
                 affected_conditions.add(condition)
@@ -196,7 +206,7 @@ class AgentOrchestrator:
         marks: dict[str, Decimal] = {}
         for token_id, book in self.books.items():
             if book.best_bid is not None and book.best_ask is not None:
-                marks[token_id] = (book.best_bid + book.best_ask) / Decimal("2")
+                marks[token_id] = (book.best_bid + book.best_ask) / Decimal(2)
             elif token_id in self.last_trade_prices:
                 marks[token_id] = self.last_trade_prices[token_id]
         return marks
@@ -205,8 +215,6 @@ class AgentOrchestrator:
         try:
             self.risk.evaluate(self.mark_prices())
         except ValueError:
-            # Missing marks never authorize risk-taking; they simply prevent a
-            # fresh equity calculation until complete book state is available.
             return
 
     def _consider_arbitrage(self, condition_id: str) -> None:
@@ -217,7 +225,11 @@ class AgentOrchestrator:
             return
         yes_book = self.books.get(market.yes_token_id)
         no_book = self.books.get(market.no_token_id)
-        if yes_book is None or no_book is None or not self._books_fresh(yes_book, no_book):
+        if (
+            yes_book is None
+            or no_book is None
+            or not self._books_fresh(yes_book, no_book)
+        ):
             return
         opportunity = self.arbitrage.evaluate(
             market,
@@ -262,8 +274,6 @@ class AgentOrchestrator:
         threshold = max(self.max_book_age_ms * 2, 60_000)
         return int(time.time() * 1000) - self.last_event_received_ms <= threshold
 
-
-from api.server import create_app
 
 orchestrator = AgentOrchestrator()
 api_app = create_app(orchestrator)
