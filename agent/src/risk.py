@@ -1,30 +1,42 @@
-import logging
-from dataclasses import dataclass, field
-from datetime import datetime
+"""Ledger-backed paper risk controls."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from decimal import Decimal
+
+from accounting.ledger import Ledger
 from config import settings
 
-log = logging.getLogger(__name__)
-
-
-@dataclass
-class PositionSize:
-    market_id: str
-    side: str
-    kelly_fraction: float
-    recommended_usd: float
-    portfolio_pct: float
+ZERO = Decimal(0)
 
 
 class RiskManager:
-    def __init__(self, initial_bankroll: float = 1000.0):
-        self._initial_bankroll = initial_bankroll
-        self._current_bankroll = initial_bankroll
-        self._peak_bankroll = initial_bankroll
-        self._killed: bool = False
-        self._kill_reason: str = ""
+    def __init__(
+        self,
+        ledger: Ledger,
+        *,
+        max_drawdown_pct: Decimal | str | None = None,
+        max_position_pct: Decimal | str = "0.05",
+    ):
+        self.ledger = ledger
+        self.max_drawdown_pct = Decimal(
+            str(
+                settings.max_drawdown_pct
+                if max_drawdown_pct is None
+                else max_drawdown_pct
+            )
+        )
+        self.max_position_pct = Decimal(str(max_position_pct))
+        stored_peak = ledger.get_metadata_decimal("risk_peak_equity")
+        self._peak_equity = max(stored_peak or ledger.initial_cash, ledger.initial_cash)
+        self._last_equity = ledger.initial_cash
+        self._last_drawdown = ZERO
+        self._killed = ledger.get_metadata("risk_killed", "0") == "1"
+        self._kill_reason = ledger.get_metadata("risk_kill_reason", "") or ""
         self._kill_timestamp: datetime | None = None
         self._order_timestamps: list[datetime] = []
-        self.pnl_history: list[dict] = []
 
     @property
     def is_killed(self) -> bool:
@@ -34,75 +46,75 @@ class RiskManager:
     def kill_reason(self) -> str:
         return self._kill_reason
 
-    def check_drawdown(self) -> bool:
-        if self._killed:
-            return True
-        drawdown = (self._peak_bankroll - self._current_bankroll) / self._peak_bankroll
-        if drawdown >= settings.max_drawdown_pct:
-            self._killed = True
-            self._kill_reason = (
-                f"Drawdown {drawdown:.1%} exceeded {settings.max_drawdown_pct:.0%}. "
-                f"Peak: ${self._peak_bankroll:,.2f} | Now: ${self._current_bankroll:,.2f}"
-            )
-            self._kill_timestamp = datetime.utcnow()
-            log.critical(f"🛑 KILL SWITCH: {self._kill_reason}")
-        return self._killed
+    def kill(self, reason: str) -> None:
+        self._killed = True
+        self._kill_reason = reason or "manually triggered"
+        self._kill_timestamp = datetime.now(UTC)
+        self.ledger.set_metadata("risk_killed", "1")
+        self.ledger.set_metadata("risk_kill_reason", self._kill_reason)
 
     def resume(self) -> None:
-        log.warning("Kill switch manually reset by operator.")
         self._killed = False
         self._kill_reason = ""
         self._kill_timestamp = None
+        self.ledger.set_metadata("risk_killed", "0")
+        self.ledger.set_metadata("risk_kill_reason", "")
 
-    def size_position(self, market_id: str, side: str,
-                      edge: float, price: float) -> PositionSize | None:
-        if self._killed or edge <= 0:
-            return None
-        odds = (1.0 - price) / price if price > 0 else 1.0
-        full_kelly = edge / odds
-        fractional_kelly = full_kelly * settings.kelly_fraction
-        max_pct = min(fractional_kelly, 0.05)
-        recommended_usd = self._current_bankroll * max_pct
-        return PositionSize(
-            market_id=market_id, side=side,
-            kelly_fraction=fractional_kelly,
-            recommended_usd=round(recommended_usd, 2),
-            portfolio_pct=round(max_pct * 100, 2),
-        )
+    def evaluate(self, mark_prices: Mapping[str, Decimal]) -> bool:
+        equity = self.ledger.equity(mark_prices)
+        self._last_equity = equity
+        if equity > self._peak_equity:
+            self._peak_equity = equity
+            self.ledger.set_metadata("risk_peak_equity", str(equity))
+        elif self.ledger.get_metadata("risk_peak_equity") is None:
+            self.ledger.set_metadata("risk_peak_equity", str(self._peak_equity))
+        if self._peak_equity > ZERO:
+            self._last_drawdown = (
+                self._peak_equity - equity
+            ) / self._peak_equity
+        else:
+            self._last_drawdown = ZERO
+        if self._last_drawdown >= self.max_drawdown_pct and not self._killed:
+            self.kill(
+                f"Drawdown {self._last_drawdown:.1%} exceeded "
+                f"{self.max_drawdown_pct:.0%}; "
+                f"peak={self._peak_equity}, equity={equity}"
+            )
+        return self._killed
 
-    def update_bankroll(self, new_value: float, note: str = "") -> None:
-        self._current_bankroll = new_value
-        if new_value > self._peak_bankroll:
-            self._peak_bankroll = new_value
-        self.pnl_history.append({
-            "timestamp": datetime.utcnow().isoformat(),
-            "bankroll": new_value, "note": note,
-        })
-        self.check_drawdown()
-
-    @property
-    def stats(self) -> dict:
-        drawdown = (self._peak_bankroll - self._current_bankroll) / self._peak_bankroll
-        return {
-            "initial_bankroll": self._initial_bankroll,
-            "current_bankroll": self._current_bankroll,
-            "peak_bankroll": self._peak_bankroll,
-            "drawdown_pct": round(drawdown * 100, 2),
-            "total_return_pct": round(
-                (self._current_bankroll - self._initial_bankroll)
-                / self._initial_bankroll * 100, 2),
-            "kill_switch_active": self._killed,
-            "kill_reason": self._kill_reason,
-        }
+    def can_allocate(
+        self, cost: Decimal, mark_prices: Mapping[str, Decimal]
+    ) -> bool:
+        if cost <= ZERO or self.evaluate(mark_prices):
+            return False
+        if cost > self.ledger.available_cash:
+            return False
+        return cost <= self._last_equity * self.max_position_pct
 
     def can_place_order(self) -> bool:
-        now = datetime.utcnow()
+        if self._killed:
+            return False
+        now = datetime.now(UTC)
         self._order_timestamps = [
-            t for t in self._order_timestamps
-            if (now - t).total_seconds() < 60
+            timestamp
+            for timestamp in self._order_timestamps
+            if (now - timestamp).total_seconds() < 60
         ]
         if len(self._order_timestamps) >= 60:
-            log.warning("Rate limit: 60 orders/min reached")
             return False
         self._order_timestamps.append(now)
         return True
+
+    @property
+    def stats(self) -> dict:
+        return {
+            "initial_cash": str(self.ledger.initial_cash),
+            "cash": str(self.ledger.cash),
+            "available_cash": str(self.ledger.available_cash),
+            "equity": str(self._last_equity),
+            "peak_equity": str(self._peak_equity),
+            "drawdown_pct": float(self._last_drawdown * 100),
+            "realized_pnl": str(self.ledger.realized_pnl),
+            "kill_switch_active": self._killed,
+            "kill_reason": self._kill_reason,
+        }

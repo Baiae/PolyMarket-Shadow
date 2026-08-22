@@ -1,0 +1,53 @@
+name: Live Adapter Smoke
+
+on:
+  push:
+    branches:
+      - feat/v0.2-truthful-paper-core
+    paths:
+      - 'agent/scripts/live_adapter_smoke.py'
+      - '.github/workflows/live-adapter-smoke.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'agent/scripts/live_adapter_smoke.py'
+      - '.github/workflows/live-adapter-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install smoke dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install aiohttp websockets pydantic-settings
+
+      - name: Run read-only live Gamma + WebSocket smoke
+        working-directory: agent
+        run: |
+          python scripts/live_adapter_smoke.py \
+            --seconds 25 \
+            --market-count 3 \
+            --output ../live-adapter-smoke/evidence.json
+
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-adapter-smoke-evidence
+          path: live-adapter-smoke/evidence.json
+          if-no-files-found: error
+          retention-days: 14
