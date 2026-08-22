@@ -7,6 +7,12 @@ on:
     paths:
       - 'agent/scripts/live_adapter_smoke.py'
       - '.github/workflows/live-adapter-smoke.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'agent/scripts/live_adapter_smoke.py'
+      - '.github/workflows/live-adapter-smoke.yml'
   workflow_dispatch:
 
 permissions:
