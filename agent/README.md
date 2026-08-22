@@ -1,10 +1,10 @@
-# Poly-Shadow v0.2 — Truthful Paper Core
+# Poly-Shadow — Truthful Paper Core + Forecast Research
 
-> **Paper simulation only.** There is no live-order adapter in v0.2, and setting `PAPER_TRADING=false` aborts startup.
+> **Paper simulation only.** There is no live-order adapter, and setting `PAPER_TRADING=false` aborts startup.
 
 ## Purpose
 
-v0.2 makes the observation-to-accounting chain trustworthy before adding forecasting ambition. The core invariant is:
+The paper core makes the observation-to-accounting chain trustworthy before forecasting can influence execution:
 
 ```text
 Market identity
@@ -17,9 +17,22 @@ Market identity
   → evaluation
 ```
 
-A downstream component must not manufacture information omitted upstream. In particular, midpoint/display prices are not treated as executable fills, and an ensemble vote count is not treated as a calibrated event probability.
+The P1 forecasting subsystem is deliberately separate:
 
-## Architecture
+```text
+Timestamped market baseline
+  + timestamped evidence provenance
+  → provider-neutral probability forecast
+  → append-only forecast journal
+  → resolution
+  → Brier / log loss / calibration
+  → comparison with market baseline
+  → evidence-based ensemble weight
+```
+
+A downstream component must not manufacture information omitted upstream. Midpoint/display prices are not executable fills, and model vote fractions are not calibrated event probabilities.
+
+## Paper-core architecture
 
 ```text
 GammaAdapter
@@ -39,27 +52,38 @@ PolymarketStream
 OrderBook (Decimal)
           ↓
 ExecutableArbitrageDetector
-  ├── equal-share depth
-  ├── fee curve
-  └── optional slippage reserve
           ↓
 PaperBroker
   └── atomic YES + NO fills
           ↓
 Ledger (SQLite)
-  ├── immutable fill entries
-  ├── reservations
-  ├── positions
-  └── idempotent settlement
           ↓
 RiskManager
-  ├── equity
-  ├── peak equity
-  ├── drawdown kill
-  └── allocation/rate limits
           ↓
 FastAPI local control/observation API
 ```
+
+## Forecasting research contract
+
+`src/forecasting/` and `src/evaluation/` provide:
+
+- `ForecastRequest`: one market/question at one issuance time;
+- `EvidenceItem`: source, retrieval/publication timestamps, immutable content hash, and content;
+- `MarketBaseline`: contemporaneous YES midpoint with timestamp/source/bid/ask;
+- `ProbabilisticForecast`: explicit `probability_yes`, uncertainty, abstention, model identity, and provenance links;
+- `OpenAICompatibleForecastProvider`: local or remote OpenAI-compatible adapter with no fixed model roster;
+- `ForecastExperiment`: bounded multi-provider research runner with failure isolation;
+- `ForecastJournal`: append-only SQLite requests/evidence/forecasts/resolutions;
+- Brier score, log loss, reliability bins, expected calibration error, and market-baseline comparisons;
+- skill-weighted ensembles whose weights must come from measured Brier skill.
+
+### Anti-leakage rules
+
+A request is rejected if evidence or the market baseline is timestamped after forecast issuance. Forecasts issued at or after a known resolution time are rejected. The provider prompt hides the market baseline by default to avoid price anchoring; exposing it is an explicit experiment flag.
+
+### Execution boundary
+
+The forecasting runner imports neither `PaperBroker` nor `RiskManager`. Forecasting output is research evidence only. There is no directional execution path and no Kelly sizing input based on model output.
 
 ## Quickstart
 
@@ -75,22 +99,21 @@ The API binds to `127.0.0.1:8000` by default.
 ### Important runtime properties
 
 - Public market-data APIs are used for the paper core; no Polymarket private trading keys are required.
-- SQLite state defaults to `data/poly_shadow.db` and survives restart.
-- `logs/` and the database parent directory are created automatically.
+- Trading state defaults to `data/poly_shadow.db` and survives restart.
+- Forecast research state defaults to `data/forecasting.db` and is separate from the trading ledger.
 - Books without timestamps, stale books, missing marks, insufficient depth, insufficient paper cash, duplicate fill IDs, and non-positive net arbitrage are fail-closed conditions.
-- Binary arbitrage records both legs in one SQLite transaction. One paper leg cannot commit without the other.
-- A resolution can settle a condition only once.
+- Binary arbitrage records both legs in one SQLite transaction.
+- A resolution can settle a trading condition only once.
 - The API adds no wildcard CORS policy. Remote control is not enabled by default.
 
 ## Configuration
 
-See `.env.example`. The principal P0 settings are:
-
 | Setting | Default | Purpose |
 |---|---:|---|
-| `PAPER_TRADING` | `true` | Must remain true in v0.2 |
+| `PAPER_TRADING` | `true` | Must remain true |
 | `INITIAL_BANKROLL` | `1000` | Initial paper cash |
-| `DATABASE_PATH` | `data/poly_shadow.db` | Canonical durable state |
+| `DATABASE_PATH` | `data/poly_shadow.db` | Canonical trading state |
+| `FORECAST_DATABASE_PATH` | `data/forecasting.db` | Append-only forecasting research journal |
 | `MARKET_DISCOVERY_LIMIT` | `50` | Gamma markets loaded at startup |
 | `MARKET_MAX_BOOK_AGE_MS` | `60000` | Stale-book rejection threshold |
 | `ARB_MIN_NET_PROFIT` | `0.01` | Minimum net paper arb profit |
@@ -100,6 +123,8 @@ See `.env.example`. The principal P0 settings are:
 | `MAX_POSITION_PCT` | `0.05` | Allocation cap as fraction of equity |
 | `API_HOST` | `127.0.0.1` | Local API binding |
 | `CONTROL_TOKEN` | empty | Optional additional local control token |
+
+Provider credentials/endpoints are supplied to forecasting research runners, not to the paper execution process.
 
 ## API
 
@@ -115,6 +140,17 @@ See `.env.example`. The principal P0 settings are:
 
 If `CONTROL_TOKEN` is set, control requests must also send it in `X-Poly-Shadow-Control-Token`.
 
+## Forecast evaluation
+
+After resolutions have been recorded in the forecast journal:
+
+```bash
+cd agent
+python scripts/forecast_report.py --db data/forecasting.db
+```
+
+The report exposes mean Brier/log loss alongside the corresponding market-baseline scores. A forecaster is not considered useful merely because it sounds confident or agrees with other models.
+
 ## Verification
 
 ```bash
@@ -123,20 +159,16 @@ ruff check src/
 pylint src/ --disable=C0114,C0115,C0116 --fail-under=7.0
 ```
 
-The suite is intentionally offline for deterministic contract tests. A bounded live Gamma/WebSocket smoke check remains a separate requalification step because external API availability should not determine unit-test results.
+The deterministic suite remains offline. The separate bounded live Gamma/WebSocket workflow verifies external market-data compatibility.
 
-## Deferred to P1
+## Remaining P1 work
 
-- calibrated probabilistic forecasting and proper scoring rules;
-- evidence provenance for forecasts;
-- provider-neutral local/remote model adapters;
-- whale-flow evaluation as a hypothesis rather than an automatic signal;
-- Flutter API migration/requalification;
-- dependency locking and deliberate package-family upgrades;
+- accumulate resolved out-of-sample forecasting evidence;
+- evaluate whale-flow features as hypotheses rather than automatic signals;
+- migrate/requalify the Flutter dashboard;
+- lock dependencies and upgrade package families deliberately;
 - authenticated non-loopback operator access, if ever needed.
-
-`src/strategy/swarm.py` remains only to preserve the v0.1 experiment/tests while that P1 redesign is pending. It is not imported by `main.py` and cannot produce v0.2 paper orders.
 
 ## Live-capital boundary
 
-There is no CLOB order client in the v0.2 runtime dependency path. Live capital is not unlocked by an environment variable. Any future live-execution capability requires a separate proposal, explicit approval, reconciliation/idempotency design, authentication and secrets review, failure testing, capital limits, and evidence from resolved paper evaluation.
+There is no CLOB order client in the runtime dependency path. Live capital is not unlocked by an environment variable. Any future live-execution capability requires a separate proposal, explicit approval, reconciliation/idempotency design, authentication and secrets review, failure testing, capital limits, and evidence from resolved paper evaluation.

@@ -33,7 +33,3 @@ jobs:
         run: pytest --tb=short -v
         env:
           PAPER_TRADING: "true"
-          POLYMARKET_API_KEY: "test"
-          POLYMARKET_SECRET: "test"
-          POLYMARKET_PASSPHRASE: "test"
-          OPENROUTER_API_KEY: "test"
