@@ -1,0 +1,32 @@
+"""Polymarket taker-fee math for paper execution."""
+
+from __future__ import annotations
+
+from decimal import Decimal, ROUND_HALF_UP
+
+from domain.market import MarketIdentity
+
+
+FEE_QUANTUM = Decimal("0.00001")
+ZERO = Decimal("0")
+ONE = Decimal("1")
+
+
+def taker_fee(shares: Decimal, price: Decimal, market: MarketIdentity) -> Decimal:
+    """Return USDC fee for a taker fill.
+
+    Polymarket's fee curve is ``C * rate * (p * (1-p)) ** exponent``.  The
+    common current schedules use exponent 1. Fees are rounded to 5 decimals;
+    sub-quantum results round to zero.
+    """
+
+    if not market.fees_enabled or market.fee_rate <= ZERO:
+        return ZERO
+    if shares <= ZERO:
+        return ZERO
+    if price < ZERO or price > ONE:
+        raise ValueError("price must be within [0,1]")
+    price_component = price * (ONE - price)
+    fee = shares * market.fee_rate * (price_component ** market.fee_exponent)
+    rounded = fee.quantize(FEE_QUANTUM, rounding=ROUND_HALF_UP)
+    return rounded if rounded >= FEE_QUANTUM else ZERO

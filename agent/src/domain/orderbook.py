@@ -34,11 +34,18 @@ class PriceLevel:
 
 
 @dataclass(frozen=True, slots=True)
+class ExecutionLevel:
+    price: Decimal
+    shares: Decimal
+
+
+@dataclass(frozen=True, slots=True)
 class FillQuote:
     requested_shares: Decimal
     filled_shares: Decimal
     notional: Decimal
     average_price: Decimal | None
+    levels: tuple[ExecutionLevel, ...] = ()
 
     @property
     def complete(self) -> bool:
@@ -46,8 +53,7 @@ class FillQuote:
 
     @property
     def unfilled_shares(self) -> Decimal:
-        remaining = self.requested_shares - self.filled_shares
-        return max(remaining, ZERO)
+        return max(self.requested_shares - self.filled_shares, ZERO)
 
 
 class OrderBook:
@@ -99,13 +105,9 @@ class OrderBook:
         book_hash: str | None = None,
     ) -> None:
         normalized = side.strip().upper()
-        if normalized == "BUY":
-            target = self.bids
-        elif normalized == "SELL":
-            target = self.asks
-        else:
+        target = self.bids if normalized == "BUY" else self.asks if normalized == "SELL" else None
+        if target is None:
             raise ValueError(f"unknown order side: {side!r}")
-
         p = as_decimal(price)
         s = as_decimal(size)
         if p < ZERO or p > Decimal("1"):
@@ -125,28 +127,23 @@ class OrderBook:
         requested = as_decimal(shares)
         if requested <= ZERO:
             raise ValueError("requested shares must be positive")
-
         remaining = requested
         filled = ZERO
         notional = ZERO
+        levels: list[ExecutionLevel] = []
         for price in sorted(self.asks):
             available = self.asks[price]
             if available <= ZERO:
                 continue
             take = min(remaining, available)
+            levels.append(ExecutionLevel(price=price, shares=take))
             filled += take
             notional += take * price
             remaining -= take
             if remaining <= ZERO:
                 break
-
         average = notional / filled if filled > ZERO else None
-        return FillQuote(
-            requested_shares=requested,
-            filled_shares=filled,
-            notional=notional,
-            average_price=average,
-        )
+        return FillQuote(requested, filled, notional, average, tuple(levels))
 
     @staticmethod
     def _levels(values: Iterable[Mapping[str, Any]]) -> dict[Decimal, Decimal]:

@@ -1,9 +1,4 @@
-"""Canonical Polymarket identity model.
-
-Polymarket exposes several identifiers for the same binary market.  v0.2 keeps
-those identifiers explicit so a CLOB token ID can never be mistaken for a
-Gamma market ID or condition ID.
-"""
+"""Canonical Polymarket identity and trading-constraint model."""
 
 from __future__ import annotations
 
@@ -32,9 +27,7 @@ def _as_list(value: Any) -> list[Any]:
             parsed = json.loads(value)
         except json.JSONDecodeError:
             return [value]
-        if isinstance(parsed, list):
-            return parsed
-        return [parsed]
+        return parsed if isinstance(parsed, list) else [parsed]
     return [value]
 
 
@@ -59,7 +52,11 @@ class MarketIdentity:
     category: str = ""
     end_date: str = ""
     fees_enabled: bool = False
-    taker_base_fee: Decimal = Decimal("0")
+    fee_rate: Decimal = Decimal("0")
+    fee_exponent: Decimal = Decimal("1")
+    maker_rebate_rate: Decimal = Decimal("0")
+    minimum_tick_size: Decimal | None = None
+    minimum_order_size: Decimal | None = None
 
     @property
     def token_ids(self) -> tuple[str, str]:
@@ -82,20 +79,11 @@ class MarketIdentity:
 
     @classmethod
     def from_gamma(cls, market: Mapping[str, Any], *, event_id: str = "") -> "MarketIdentity":
-        """Build identity from either current SDK-style or raw Gamma payloads.
-
-        Current SDK representations expose ``outcomes.yes/no.token_id`` while
-        raw Gamma responses commonly expose JSON-encoded ``clobTokenIds`` and
-        ``outcomes`` fields.  Both forms are accepted; non-binary or incomplete
-        markets are rejected instead of guessed.
-        """
-
         gamma_id = str(market.get("id") or "").strip()
         condition_id = str(
             market.get("conditionId") or market.get("condition_id") or ""
         ).strip()
         question = str(market.get("question") or "").strip()
-
         if not gamma_id:
             raise MarketIdentityError("missing Gamma market id")
         if not condition_id:
@@ -103,19 +91,14 @@ class MarketIdentity:
 
         yes_token = ""
         no_token = ""
-
         outcomes_obj = market.get("outcomes")
         if isinstance(outcomes_obj, Mapping):
             yes_obj = outcomes_obj.get("yes") or outcomes_obj.get("Yes") or {}
             no_obj = outcomes_obj.get("no") or outcomes_obj.get("No") or {}
             if isinstance(yes_obj, Mapping):
-                yes_token = str(
-                    yes_obj.get("tokenId") or yes_obj.get("token_id") or ""
-                ).strip()
+                yes_token = str(yes_obj.get("tokenId") or yes_obj.get("token_id") or "").strip()
             if isinstance(no_obj, Mapping):
-                no_token = str(
-                    no_obj.get("tokenId") or no_obj.get("token_id") or ""
-                ).strip()
+                no_token = str(no_obj.get("tokenId") or no_obj.get("token_id") or "").strip()
 
         if not yes_token or not no_token:
             token_ids = _as_list(
@@ -125,12 +108,10 @@ class MarketIdentity:
                 or market.get("token_ids")
             )
             outcome_names = _as_list(outcomes_obj)
-
             if len(token_ids) != 2:
                 raise MarketIdentityError(
                     f"market {gamma_id} is not a complete binary CLOB market"
                 )
-
             if len(outcome_names) == 2:
                 mapping = {
                     str(name).strip().upper(): str(token).strip()
@@ -139,8 +120,7 @@ class MarketIdentity:
                 yes_token = yes_token or mapping.get("YES", "")
                 no_token = no_token or mapping.get("NO", "")
             else:
-                # Raw Gamma market payloads document clobTokenIds in Yes/No
-                # order.  We only use that fallback when exactly two IDs exist.
+                # Raw Gamma documents clobTokenIds in binary Yes/No order.
                 yes_token = yes_token or str(token_ids[0]).strip()
                 no_token = no_token or str(token_ids[1]).strip()
 
@@ -148,13 +128,6 @@ class MarketIdentity:
             raise MarketIdentityError(
                 f"market {gamma_id} missing distinct YES/NO CLOB token IDs"
             )
-
-        resolved_event_id = str(
-            event_id
-            or market.get("eventId")
-            or market.get("event_id")
-            or ""
-        ).strip()
 
         category = str(market.get("category") or "").strip()
         if not category:
@@ -166,26 +139,44 @@ class MarketIdentity:
                 else:
                     category = str(first).strip()
 
+        fee_schedule = market.get("feeSchedule") or market.get("fee_schedule") or {}
+        if not isinstance(fee_schedule, Mapping):
+            fee_schedule = {}
+
+        tick_raw = market.get("orderPriceMinTickSize")
+        if tick_raw is None:
+            tick_raw = market.get("minimum_tick_size")
+        min_order_raw = market.get("orderMinSize")
+        if min_order_raw is None:
+            min_order_raw = market.get("minimum_order_size")
+
         return cls(
             gamma_market_id=gamma_id,
             condition_id=condition_id,
             yes_token_id=yes_token,
             no_token_id=no_token,
             question=question,
-            event_id=resolved_event_id,
+            event_id=str(event_id or market.get("eventId") or market.get("event_id") or "").strip(),
             slug=str(market.get("slug") or "").strip(),
             category=category,
-            end_date=str(
-                market.get("endDate") or market.get("end_date") or ""
-            ).strip(),
+            end_date=str(market.get("endDate") or market.get("end_date") or "").strip(),
             fees_enabled=bool(
                 market.get("feesEnabled")
                 if "feesEnabled" in market
                 else market.get("fees_enabled", False)
             ),
-            taker_base_fee=_decimal(
-                market.get("takerBaseFee")
-                if "takerBaseFee" in market
-                else market.get("taker_base_fee")
+            fee_rate=_decimal(fee_schedule.get("rate"), "0"),
+            fee_exponent=_decimal(fee_schedule.get("exponent"), "1"),
+            maker_rebate_rate=_decimal(
+                fee_schedule.get("rebateRate")
+                if "rebateRate" in fee_schedule
+                else fee_schedule.get("rebate_rate"),
+                "0",
+            ),
+            minimum_tick_size=(
+                _decimal(tick_raw) if tick_raw not in (None, "") else None
+            ),
+            minimum_order_size=(
+                _decimal(min_order_raw) if min_order_raw not in (None, "") else None
             ),
         )
