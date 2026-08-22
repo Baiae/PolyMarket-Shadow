@@ -20,12 +20,14 @@ if str(SRC_DIR) not in sys.path:
 
 from adapters.polymarket.gamma import GammaAdapter  # noqa: E402
 from config import settings  # noqa: E402
+from evaluation.cohort import DEFAULT_POLICY, CohortManifest  # noqa: E402
 from forecasting.collection import (  # noqa: E402
     ClobSnapshotClient,
     EvidenceManifest,
     LiveForecastCollector,
     load_provider_specs,
 )
+from forecasting.forecast import utc_now  # noqa: E402
 from forecasting.journal import ForecastJournal  # noqa: E402
 
 
@@ -43,9 +45,40 @@ def jsonable(value: Any) -> Any:
     return value
 
 
+def validate_cohort(
+    manifest: CohortManifest,
+    *,
+    provider_specs: tuple[Any, ...],
+    db_path: Path,
+) -> None:
+    if manifest.policy_id != DEFAULT_POLICY.policy_id:
+        raise ValueError(
+            f"unsupported cohort policy {manifest.policy_id!r}; "
+            f"expected {DEFAULT_POLICY.policy_id!r}"
+        )
+    configured = tuple(
+        sorted((spec.provider_name, spec.model_name) for spec in provider_specs)
+    )
+    registered = tuple(
+        sorted((item.provider, item.model) for item in manifest.forecasters)
+    )
+    if configured != registered:
+        raise ValueError("provider configuration does not match cohort preregistration")
+    if utc_now() < manifest.started_at:
+        raise ValueError("cohort collection cannot begin before preregistered start time")
+    if db_path == Path(settings.forecast_database_path):
+        raise ValueError(
+            "qualification cohort requires a dedicated --db path, not the default journal"
+        )
+
+
 async def run(args: argparse.Namespace) -> int:
     provider_specs = load_provider_specs(args.providers)
     providers = [spec.build() for spec in provider_specs]
+    cohort = CohortManifest.from_path(args.cohort) if args.cohort is not None else None
+    if cohort is not None:
+        validate_cohort(cohort, provider_specs=provider_specs, db_path=args.db)
+
     manifest = (
         EvidenceManifest.from_path(args.evidence)
         if args.evidence is not None
@@ -69,7 +102,18 @@ async def run(args: argparse.Namespace) -> int:
     finally:
         journal.close()
 
-    print(json.dumps(jsonable(summary), indent=2, sort_keys=True))
+    payload: Any = summary
+    if cohort is not None:
+        payload = {
+            "cohort": {
+                "cohort_id": cohort.cohort_id,
+                "policy_id": cohort.policy_id,
+                "started_at": cohort.started_at,
+                "manifest_sha256": cohort.sha256,
+            },
+            "summary": summary,
+        }
+    print(json.dumps(jsonable(payload), indent=2, sort_keys=True))
     if not summary.collected:
         return 2
     if summary.forecast_count == 0:
@@ -83,6 +127,7 @@ def main() -> int:
     )
     parser.add_argument("--providers", type=Path, required=True)
     parser.add_argument("--evidence", type=Path)
+    parser.add_argument("--cohort", type=Path)
     parser.add_argument("--db", type=Path, default=Path(settings.forecast_database_path))
     parser.add_argument("--sample-count", type=int, default=3)
     parser.add_argument("--discovery-limit", type=int, default=settings.market_discovery_limit)
