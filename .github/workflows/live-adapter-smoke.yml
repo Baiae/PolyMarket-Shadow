@@ -3,15 +3,19 @@ name: Live Adapter Smoke
 on:
   push:
     branches:
-      - feat/v0.2-truthful-paper-core
+      - main
     paths:
       - 'agent/scripts/live_adapter_smoke.py'
+      - 'agent/scripts/live_forecast_snapshot_smoke.py'
+      - 'agent/src/forecasting/collection.py'
       - '.github/workflows/live-adapter-smoke.yml'
   pull_request:
     branches:
       - main
     paths:
       - 'agent/scripts/live_adapter_smoke.py'
+      - 'agent/scripts/live_forecast_snapshot_smoke.py'
+      - 'agent/src/forecasting/collection.py'
       - '.github/workflows/live-adapter-smoke.yml'
   workflow_dispatch:
 
@@ -33,7 +37,7 @@ jobs:
       - name: Install smoke dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install aiohttp websockets pydantic-settings
+          pip install aiohttp websockets pydantic-settings openai
 
       - name: Run read-only live Gamma + WebSocket smoke
         working-directory: agent
@@ -41,13 +45,20 @@ jobs:
           python scripts/live_adapter_smoke.py \
             --seconds 25 \
             --market-count 3 \
-            --output ../live-adapter-smoke/evidence.json
+            --output ../live-adapter-smoke/websocket-evidence.json
+
+      - name: Run read-only live CLOB forecast-baseline smoke
+        working-directory: agent
+        run: |
+          python scripts/live_forecast_snapshot_smoke.py \
+            --market-count 3 \
+            --output ../live-adapter-smoke/forecast-baseline-evidence.json
 
       - name: Upload smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: live-adapter-smoke-evidence
-          path: live-adapter-smoke/evidence.json
+          path: live-adapter-smoke/
           if-no-files-found: error
           retention-days: 14
