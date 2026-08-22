@@ -13,13 +13,13 @@ from .models import (
 from .stream import PolymarketStream
 
 __all__ = [
-    "GammaAdapter",
-    "PolymarketStream",
+    "BestBidAskEvent",
     "BookEvent",
+    "GammaAdapter",
+    "LastTradeEvent",
+    "MarketResolvedEvent",
+    "PolymarketStream",
     "PriceChange",
     "PriceChangeEvent",
-    "LastTradeEvent",
-    "BestBidAskEvent",
-    "MarketResolvedEvent",
     "normalize_market_event",
 ]

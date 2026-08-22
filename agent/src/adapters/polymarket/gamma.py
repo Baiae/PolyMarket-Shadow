@@ -18,19 +18,15 @@ class GammaAdapter:
         self.base_url = (base_url or settings.polymarket_gamma_url).rstrip("/")
 
     async def fetch_active_markets(self, *, limit: int = 500) -> list[MarketIdentity]:
-        """Fetch active markets and reject identities that cannot be proven.
-
-        Raw Gamma payloads vary by endpoint and API generation.  Identity
-        parsing is deliberately strict: incomplete/non-binary markets are
-        skipped rather than assigned guessed token IDs.
-        """
-
+        """Fetch active markets and reject identities that cannot be proven."""
         params = {"active": "true", "closed": "false", "limit": str(limit)}
         timeout = aiohttp.ClientTimeout(total=20)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(f"{self.base_url}/markets", params=params) as response:
-                response.raise_for_status()
-                payload: Any = await response.json()
+        async with (
+            aiohttp.ClientSession(timeout=timeout) as session,
+            session.get(f"{self.base_url}/markets", params=params) as response,
+        ):
+            response.raise_for_status()
+            payload: Any = await response.json()
 
         markets = payload if isinstance(payload, list) else payload.get("markets", [])
         identities: list[MarketIdentity] = []

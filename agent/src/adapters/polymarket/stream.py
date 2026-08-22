@@ -12,6 +12,7 @@ from typing import Any
 import websockets
 
 from config import settings
+
 from .models import NormalizedMarketEvent, normalize_market_event
 
 log = logging.getLogger(__name__)
@@ -27,7 +28,9 @@ class PolymarketStream:
         *,
         url: str | None = None,
     ):
-        self.token_ids = tuple(dict.fromkeys(str(token) for token in token_ids if token))
+        self.token_ids = tuple(
+            dict.fromkeys(str(token) for token in token_ids if token)
+        )
         if not self.token_ids:
             raise ValueError("at least one CLOB token ID is required")
         self.on_event = on_event
@@ -55,10 +58,13 @@ class PolymarketStream:
                     ping_interval=30,
                     ping_timeout=10,
                 ) as websocket:
-                    await websocket.send(json.dumps(
-                        self.subscription_payload(self.token_ids)
-                    ))
-                    log.info("Polymarket stream subscribed to %d tokens", len(self.token_ids))
+                    await websocket.send(
+                        json.dumps(self.subscription_payload(self.token_ids))
+                    )
+                    log.info(
+                        "Polymarket stream subscribed to %d tokens",
+                        len(self.token_ids),
+                    )
                     backoff = 1
                     async for raw_message in websocket:
                         if not self._running:
@@ -69,7 +75,9 @@ class PolymarketStream:
             except (OSError, websockets.WebSocketException) as exc:
                 if not self._running:
                     break
-                log.warning("Polymarket stream error: %s; retrying in %ss", exc, backoff)
+                log.warning(
+                    "Polymarket stream error: %s; retrying in %ss", exc, backoff
+                )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60)
 

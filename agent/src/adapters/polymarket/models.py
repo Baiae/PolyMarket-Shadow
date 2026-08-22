@@ -1,15 +1,11 @@
-"""Normalized events for Polymarket's public market WebSocket.
-
-The raw API uses ``event_type`` and CLOB ``asset_id`` values.  This module is
-the only place where those wire names are interpreted; the rest of Poly-Shadow
-consumes explicit token IDs and condition IDs.
-"""
+"""Normalized events for Polymarket's public market WebSocket."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
 from domain.orderbook import PriceLevel, as_decimal
 
@@ -117,17 +113,24 @@ def _event_type(raw: Mapping[str, Any]) -> str:
 
 def normalize_market_event(raw: Mapping[str, Any]) -> NormalizedMarketEvent | None:
     """Normalize current raw-API or SDK-shaped market-stream events."""
-
     event_type = _event_type(raw)
     payload = _payload(raw)
-    condition_id = str(_first(payload, "market", "condition_id", "conditionId", default=""))
+    condition_id = str(
+        _first(payload, "market", "condition_id", "conditionId", default="")
+    )
 
     if event_type == "book":
-        token_id = str(_first(payload, "asset_id", "token_id", "tokenId", default=""))
+        token_id = str(
+            _first(payload, "asset_id", "token_id", "tokenId", default="")
+        )
         if not condition_id or not token_id:
             return None
-        bids = tuple(PriceLevel.from_mapping(level) for level in payload.get("bids", []))
-        asks = tuple(PriceLevel.from_mapping(level) for level in payload.get("asks", []))
+        bids = tuple(
+            PriceLevel.from_mapping(level) for level in payload.get("bids", [])
+        )
+        asks = tuple(
+            PriceLevel.from_mapping(level) for level in payload.get("asks", [])
+        )
         return BookEvent(
             condition_id=condition_id,
             token_id=token_id,
@@ -143,21 +146,29 @@ def normalize_market_event(raw: Mapping[str, Any]) -> NormalizedMarketEvent | No
         for change in raw_changes or []:
             if not isinstance(change, Mapping):
                 continue
-            token_id = str(_first(change, "asset_id", "token_id", "tokenId", default=""))
+            token_id = str(
+                _first(change, "asset_id", "token_id", "tokenId", default="")
+            )
             if not token_id:
                 continue
             side = str(change.get("side") or "").upper()
             if side not in {"BUY", "SELL"}:
                 continue
-            changes.append(PriceChange(
-                token_id=token_id,
-                price=as_decimal(change.get("price")),
-                size=as_decimal(change.get("size")),
-                side=side,
-                best_bid=_optional_decimal(_first(change, "best_bid", "bestBid")),
-                best_ask=_optional_decimal(_first(change, "best_ask", "bestAsk")),
-                book_hash=_first(change, "hash", default=None),
-            ))
+            changes.append(
+                PriceChange(
+                    token_id=token_id,
+                    price=as_decimal(change.get("price")),
+                    size=as_decimal(change.get("size")),
+                    side=side,
+                    best_bid=_optional_decimal(
+                        _first(change, "best_bid", "bestBid")
+                    ),
+                    best_ask=_optional_decimal(
+                        _first(change, "best_ask", "bestAsk")
+                    ),
+                    book_hash=_first(change, "hash", default=None),
+                )
+            )
         if not condition_id or not changes:
             return None
         return PriceChangeEvent(
@@ -167,7 +178,9 @@ def normalize_market_event(raw: Mapping[str, Any]) -> NormalizedMarketEvent | No
         )
 
     if event_type == "last_trade_price":
-        token_id = str(_first(payload, "asset_id", "token_id", "tokenId", default=""))
+        token_id = str(
+            _first(payload, "asset_id", "token_id", "tokenId", default="")
+        )
         if not condition_id or not token_id:
             return None
         return LastTradeEvent(
@@ -176,13 +189,19 @@ def normalize_market_event(raw: Mapping[str, Any]) -> NormalizedMarketEvent | No
             price=as_decimal(payload.get("price")),
             size=_optional_decimal(payload.get("size")),
             side=str(payload.get("side") or "").upper(),
-            fee_rate_bps=_optional_decimal(_first(payload, "fee_rate_bps", "feeRateBps")),
+            fee_rate_bps=_optional_decimal(
+                _first(payload, "fee_rate_bps", "feeRateBps")
+            ),
             timestamp_ms=_timestamp(payload),
-            transaction_hash=_first(payload, "transaction_hash", "transactionHash", default=None),
+            transaction_hash=_first(
+                payload, "transaction_hash", "transactionHash", default=None
+            ),
         )
 
     if event_type == "best_bid_ask":
-        token_id = str(_first(payload, "asset_id", "token_id", "tokenId", default=""))
+        token_id = str(
+            _first(payload, "asset_id", "token_id", "tokenId", default="")
+        )
         if not condition_id or not token_id:
             return None
         return BestBidAskEvent(
@@ -195,16 +214,20 @@ def normalize_market_event(raw: Mapping[str, Any]) -> NormalizedMarketEvent | No
         )
 
     if event_type == "market_resolved":
-        token_ids = _first(payload, "assets_ids", "token_ids", "tokenIds", default=[])
+        token_ids = _first(
+            payload, "assets_ids", "token_ids", "tokenIds", default=[]
+        )
         if not isinstance(token_ids, (list, tuple)):
             token_ids = []
-        winning = str(_first(
-            payload,
-            "winning_asset_id",
-            "winning_token_id",
-            "winningTokenId",
-            default="",
-        ))
+        winning = str(
+            _first(
+                payload,
+                "winning_asset_id",
+                "winning_token_id",
+                "winningTokenId",
+                default="",
+            )
+        )
         gamma_id = str(payload.get("id") or "")
         if not condition_id or not gamma_id or not winning:
             return None
@@ -213,9 +236,9 @@ def normalize_market_event(raw: Mapping[str, Any]) -> NormalizedMarketEvent | No
             condition_id=condition_id,
             token_ids=tuple(str(token) for token in token_ids),
             winning_token_id=winning,
-            winning_outcome=str(_first(
-                payload, "winning_outcome", "winningOutcome", default=""
-            )).upper(),
+            winning_outcome=str(
+                _first(payload, "winning_outcome", "winningOutcome", default="")
+            ).upper(),
             timestamp_ms=_timestamp(payload),
         )
 
