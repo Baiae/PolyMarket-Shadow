@@ -105,12 +105,12 @@ class OpenAICompatibleForecastProvider:
         except json.JSONDecodeError as exc:
             raise ValueError("forecast provider returned invalid JSON") from exc
         if not isinstance(payload, dict):
-            raise ValueError("forecast provider JSON must be an object")
+            raise TypeError("forecast provider JSON must be an object")
         probability_yes = probability(payload.get("probability_yes"))
         uncertainty = probability(payload.get("uncertainty"))
         abstain = payload.get("abstain")
         if not isinstance(abstain, bool):
-            raise ValueError("forecast provider abstain must be boolean")
+            raise TypeError("forecast provider abstain must be boolean")
         rationale = str(payload.get("rationale") or "").strip()
         return ProbabilisticForecast(
             forecast_id=make_forecast_id(
