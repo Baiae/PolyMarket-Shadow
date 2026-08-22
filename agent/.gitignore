@@ -6,6 +6,8 @@ __pycache__/
 venv/
 .pytest_cache/
 data/*.csv
+data/*.db
+data/*.db-*
 logs/*.log
 dist/
 build/

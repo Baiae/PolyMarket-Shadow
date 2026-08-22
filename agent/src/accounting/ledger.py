@@ -69,9 +69,7 @@ class Ledger:
 
     @property
     def initial_cash(self) -> Decimal:
-        row = self._db.execute(
-            "SELECT value FROM metadata WHERE key='initial_cash'"
-        ).fetchone()
+        row = self._db.execute("SELECT value FROM metadata WHERE key='initial_cash'").fetchone()
         return Decimal(row["value"])
 
     @property
@@ -83,12 +81,12 @@ class Ledger:
 
     @property
     def reserved_cash(self) -> Decimal:
-        total = ZERO
-        for row in self._db.execute(
-            "SELECT amount FROM reservations WHERE active=1"
-        ):
-            total += Decimal(row["amount"])
-        return total
+        return sum(
+            (Decimal(row["amount"]) for row in self._db.execute(
+                "SELECT amount FROM reservations WHERE active=1"
+            )),
+            ZERO,
+        )
 
     @property
     def available_cash(self) -> Decimal:
@@ -99,10 +97,9 @@ class Ledger:
             return False
         self._db.execute("BEGIN IMMEDIATE")
         try:
-            existing = self._db.execute(
+            if self._db.execute(
                 "SELECT 1 FROM reservations WHERE order_id=?", (order_id,)
-            ).fetchone()
-            if existing is not None:
+            ).fetchone():
                 self._db.execute("ROLLBACK")
                 return False
             if self.available_cash < amount:
@@ -119,36 +116,21 @@ class Ledger:
             raise
 
     def release(self, order_id: str) -> None:
-        self._db.execute(
-            "UPDATE reservations SET active=0 WHERE order_id=?", (order_id,)
-        )
+        self._db.execute("UPDATE reservations SET active=0 WHERE order_id=?", (order_id,))
 
     @staticmethod
-    def _fill_row(fill: Fill) -> tuple[str, ... | int | None]:
+    def _fill_row(fill: Fill) -> tuple[object, ...]:
         return (
-            f"fill:{fill.fill_id}",
-            "BUY",
-            str(-fill.total_cost),
-            fill.condition_id,
-            fill.token_id,
-            fill.side,
-            str(fill.filled_shares),
-            str(fill.average_price),
-            str(fill.fee),
-            fill.source,
-            fill.timestamp_ms,
+            f"fill:{fill.fill_id}", "BUY", str(-fill.total_cost),
+            fill.condition_id, fill.token_id, fill.side,
+            str(fill.filled_shares), str(fill.average_price), str(fill.fee),
+            fill.source, fill.timestamp_ms,
         )
 
     def record_fill(self, fill: Fill) -> bool:
         return self.record_fills_atomic([fill])
 
     def record_fills_atomic(self, fills: Sequence[Fill]) -> bool:
-        """Append one or more fills in a single transaction.
-
-        Binary arbitrage uses this method so a duplicate/error can never leave
-        only one leg committed to the paper portfolio.
-        """
-
         if not fills:
             return False
         keys = [f"fill:{fill.fill_id}" for fill in fills]
@@ -165,12 +147,10 @@ class Ledger:
                 self._db.execute("ROLLBACK")
                 return False
             self._db.executemany(
-                """
-                INSERT INTO ledger_entries(
+                """INSERT INTO ledger_entries(
                     event_key, entry_type, cash_delta, condition_id, token_id,
                     side, shares, price, fee, source, timestamp_ms
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
-                """,
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 [self._fill_row(fill) for fill in fills],
             )
             self._db.execute("COMMIT")
@@ -180,28 +160,17 @@ class Ledger:
             raise
 
     def positions(self) -> list[Position]:
-        resolved = {
-            row["condition_id"]
-            for row in self._db.execute("SELECT condition_id FROM resolutions")
-        }
-        grouped: dict[tuple[str, str, str], list[Decimal]] = defaultdict(
-            lambda: [ZERO, ZERO]
-        )
-        rows = self._db.execute(
-            """SELECT condition_id, token_id, side, shares, cash_delta
-               FROM ledger_entries WHERE entry_type='BUY'"""
-        )
-        for row in rows:
+        resolved = {row["condition_id"] for row in self._db.execute("SELECT condition_id FROM resolutions")}
+        grouped: dict[tuple[str, str, str], list[Decimal]] = defaultdict(lambda: [ZERO, ZERO])
+        for row in self._db.execute(
+            "SELECT condition_id, token_id, side, shares, cash_delta FROM ledger_entries WHERE entry_type='BUY'"
+        ):
             if row["condition_id"] in resolved:
                 continue
             key = (row["condition_id"], row["token_id"], row["side"])
             grouped[key][0] += Decimal(row["shares"])
             grouped[key][1] += -Decimal(row["cash_delta"])
-        return [
-            Position(k[0], k[1], k[2], v[0], v[1])
-            for k, v in grouped.items()
-            if v[0] > ZERO
-        ]
+        return [Position(k[0], k[1], k[2], v[0], v[1]) for k, v in grouped.items() if v[0] > ZERO]
 
     def settle(
         self,
@@ -219,20 +188,19 @@ class Ledger:
             ).fetchone():
                 self._db.execute("ROLLBACK")
                 return False
-            winning_shares = ZERO
-            rows = self._db.execute(
-                """SELECT token_id, shares FROM ledger_entries
-                   WHERE entry_type='BUY' AND condition_id=?""",
-                (condition_id,),
+            winning_shares = sum(
+                (
+                    Decimal(row["shares"])
+                    for row in self._db.execute(
+                        "SELECT token_id, shares FROM ledger_entries WHERE entry_type='BUY' AND condition_id=?",
+                        (condition_id,),
+                    )
+                    if row["token_id"] == winning_token_id
+                ),
+                ZERO,
             )
-            for row in rows:
-                if row["token_id"] == winning_token_id:
-                    winning_shares += Decimal(row["shares"])
             self._db.execute(
-                """INSERT INTO resolutions(
-                    condition_id, event_key, winning_token_id,
-                    winning_outcome, timestamp_ms
-                ) VALUES(?,?,?,?,?)""",
+                "INSERT INTO resolutions(condition_id,event_key,winning_token_id,winning_outcome,timestamp_ms) VALUES(?,?,?,?,?)",
                 (condition_id, event_key, winning_token_id, winning_outcome, timestamp_ms),
             )
             self._db.execute(
@@ -259,7 +227,7 @@ class Ledger:
             spent = ZERO
             payout = ZERO
             for row in self._db.execute(
-                "SELECT entry_type, cash_delta FROM ledger_entries WHERE condition_id=?",
+                "SELECT entry_type,cash_delta FROM ledger_entries WHERE condition_id=?",
                 (resolution["condition_id"],),
             ):
                 delta = Decimal(row["cash_delta"])

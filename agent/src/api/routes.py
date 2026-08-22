@@ -1,54 +1,63 @@
-from datetime import datetime
-from fastapi import APIRouter
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from decimal import Decimal
+
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
+
+from config import settings
 
 
 class HealthStatus(BaseModel):
     status: str
     timestamp: str
-    paper_trading: bool
-    version: str = "0.1.0"
+    paper_trading: bool = True
+    version: str = "0.2.0"
+    feed_healthy: bool
+    last_error: str
 
 
 class AgentStatus(BaseModel):
     running: bool
+    paper_trading: bool = True
     kill_switch_active: bool
     kill_reason: str
-    paper_trading: bool
+    feed_healthy: bool
+    markets_tracked: int
+    books_tracked: int
+    open_positions: int
     risk_stats: dict
-    queue_depth: int
 
 
 class TradeItem(BaseModel):
-    market_id: str
-    question: str
-    outcome: str
-    amount_usd: float
-    price: float
-    timestamp: str
-    category: str
+    condition_id: str
+    token_id: str
+    price: str
+    size: str | None
+    side: str
+    fee_rate_bps: str | None
+    timestamp_ms: int | None
 
 
 class SignalItem(BaseModel):
-    market_id: str
+    condition_id: str
     question: str
-    source: str
-    consensus: str
-    confidence: float
-    yes_count: int
-    no_count: int
-    timestamp: str
+    matched_shares: str
+    total_cost: str
+    locked_payout: str
+    net_profit: str
+    roi: str
+    timestamp_ms: int
 
 
-class OrderItem(BaseModel):
-    market_id: str
-    question: str
+class PositionItem(BaseModel):
+    condition_id: str
+    token_id: str
     side: str
-    size_usd: float
-    price: float
-    status: str
-    source: str
-    timestamp: str
+    shares: str
+    cost_basis: str
+    average_cost: str
 
 
 class KillResponse(BaseModel):
@@ -56,79 +65,109 @@ class KillResponse(BaseModel):
     message: str
 
 
+def _authorize_control(request: Request, provided_token: str | None) -> None:
+    host = request.client.host if request.client else ""
+    if host not in {"127.0.0.1", "::1", "testclient"}:
+        raise HTTPException(status_code=403, detail="control endpoint is local-only")
+    if settings.control_token and provided_token != settings.control_token:
+        raise HTTPException(status_code=403, detail="invalid control token")
+
+
 def build_router(orchestrator) -> APIRouter:
     router = APIRouter()
 
     @router.get("/healthz", response_model=HealthStatus, tags=["health"])
     async def health_check():
-        from config import settings
         return HealthStatus(
-            status="healthy" if orchestrator.running else "idle",
-            timestamp=datetime.utcnow().isoformat(),
-            paper_trading=settings.paper_trading,
+            status="healthy" if orchestrator.running and orchestrator.feed_healthy else "degraded",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            feed_healthy=orchestrator.feed_healthy,
+            last_error=orchestrator.last_error,
         )
 
     @router.get("/status", response_model=AgentStatus, tags=["agent"])
     async def get_status():
+        orchestrator._evaluate_risk_if_marked()
         return AgentStatus(
             running=orchestrator.running,
             kill_switch_active=orchestrator.risk.is_killed,
             kill_reason=orchestrator.risk.kill_reason,
-            paper_trading=orchestrator.risk.stats.get("kill_switch_active", False),
+            feed_healthy=orchestrator.feed_healthy,
+            markets_tracked=len(orchestrator.markets_by_condition),
+            books_tracked=len(orchestrator.books),
+            open_positions=len(orchestrator.ledger.positions()),
             risk_stats=orchestrator.risk.stats,
-            queue_depth=len(orchestrator.market_queue),
         )
 
     @router.get("/trades", response_model=list[TradeItem], tags=["data"])
     async def get_trades(limit: int = 50):
-        trades = orchestrator.collector.recent_trades[-limit:]
-        return [TradeItem(
-            market_id=t.market_id,
-            question=t.question or t.market_id[:20],
-            outcome=t.outcome, amount_usd=t.amount_usd,
-            price=t.price, timestamp=t.timestamp.isoformat(),
-            category=t.category,
-        ) for t in reversed(trades)]
+        result = []
+        for trade in reversed(orchestrator.recent_trades[-max(0, min(limit, 500)):]):
+            result.append(TradeItem(
+                condition_id=trade.condition_id,
+                token_id=trade.token_id,
+                price=str(trade.price),
+                size=str(trade.size) if trade.size is not None else None,
+                side=trade.side,
+                fee_rate_bps=(
+                    str(trade.fee_rate_bps) if trade.fee_rate_bps is not None else None
+                ),
+                timestamp_ms=trade.timestamp_ms,
+            ))
+        return result
 
     @router.get("/signals", response_model=list[SignalItem], tags=["signals"])
     async def get_signals(limit: int = 50):
-        results = []
-        for s in reversed(orchestrator.swarm.signals[-limit:]):
-            results.append(SignalItem(
-                market_id=s.market_id, question=s.question,
-                source="SWARM", consensus=s.consensus.value,
-                confidence=s.confidence, yes_count=s.yes_count,
-                no_count=s.no_count, timestamp=s.timestamp.isoformat()))
-        for s in reversed(orchestrator.arbitrage.signals[-limit:]):
-            results.append(SignalItem(
-                market_id=s.market_id, question=s.question,
-                source="ARB", consensus="ARB", confidence=s.edge_usd,
-                yes_count=0, no_count=0,
-                timestamp=datetime.utcnow().isoformat()))
-        return results[:limit]
+        result = []
+        for signal in reversed(orchestrator.arbitrage.signals[-max(0, min(limit, 500)):]):
+            result.append(SignalItem(
+                condition_id=signal.condition_id,
+                question=signal.question,
+                matched_shares=str(signal.matched_shares),
+                total_cost=str(signal.total_cost),
+                locked_payout=str(signal.locked_payout),
+                net_profit=str(signal.net_profit),
+                roi=str(signal.roi),
+                timestamp_ms=max(
+                    signal.yes_book_timestamp_ms, signal.no_book_timestamp_ms
+                ),
+            ))
+        return result
 
-    @router.get("/positions", response_model=list[OrderItem], tags=["execution"])
-    async def get_positions(limit: int = 100):
-        return [OrderItem(
-            market_id=o.market_id, question=o.question,
-            side=o.side, size_usd=o.size_usd, price=o.price,
-            status=o.status.value, source=o.source,
-            timestamp=o.timestamp.isoformat(),
-        ) for o in reversed(orchestrator.execution.orders[-limit:])]
+    @router.get("/positions", response_model=list[PositionItem], tags=["execution"])
+    async def get_positions():
+        return [
+            PositionItem(
+                condition_id=p.condition_id,
+                token_id=p.token_id,
+                side=p.side,
+                shares=str(p.shares),
+                cost_basis=str(p.cost_basis),
+                average_cost=str(p.average_cost),
+            )
+            for p in orchestrator.ledger.positions()
+        ]
 
     @router.post("/kill", response_model=KillResponse, tags=["control"])
-    async def trigger_kill_switch():
+    async def trigger_kill_switch(
+        request: Request,
+        x_poly_shadow_control_token: str | None = Header(default=None),
+    ):
+        _authorize_control(request, x_poly_shadow_control_token)
         if orchestrator.risk.is_killed:
             return KillResponse(success=False, message="Kill switch already active")
-        orchestrator.risk._killed = True
-        orchestrator.risk._kill_reason = "Manually triggered via Flutter dashboard"
-        return KillResponse(success=True, message="Kill switch activated")
+        orchestrator.risk.kill("Manually triggered through local control API")
+        return KillResponse(success=True, message="Paper order generation stopped")
 
     @router.post("/resume", response_model=KillResponse, tags=["control"])
-    async def resume_trading():
+    async def resume_trading(
+        request: Request,
+        x_poly_shadow_control_token: str | None = Header(default=None),
+    ):
+        _authorize_control(request, x_poly_shadow_control_token)
         if not orchestrator.risk.is_killed:
             return KillResponse(success=False, message="Kill switch not active")
         orchestrator.risk.resume()
-        return KillResponse(success=True, message="Trading resumed")
+        return KillResponse(success=True, message="Paper order generation resumed")
 
     return router
