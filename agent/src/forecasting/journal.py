@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from datetime import datetime
@@ -60,6 +61,14 @@ class ForecastJournal:
                 abstain INTEGER NOT NULL,
                 rationale TEXT NOT NULL,
                 metadata_json TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS forecast_failures (
+                failure_id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL REFERENCES requests(request_id),
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                error TEXT NOT NULL,
+                recorded_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS resolutions (
                 condition_id TEXT PRIMARY KEY,
@@ -205,6 +214,15 @@ class ForecastJournal:
         if observed_ids != expected_ids:
             raise ValueError(f"request_id {request.request_id!r} changed evidence")
 
+    def record_request(self, request: ForecastRequest) -> bool:
+        with self.connection:
+            existing = self.connection.execute(
+                "SELECT 1 FROM requests WHERE request_id = ?",
+                (request.request_id,),
+            ).fetchone()
+            self._ensure_request(request)
+        return existing is None
+
     def record_forecast(
         self,
         request: ForecastRequest,
@@ -255,6 +273,55 @@ class ForecastJournal:
                     probability_yes, uncertainty, abstain,
                     rationale, metadata_json
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                values,
+            )
+        return True
+
+    def record_failure(
+        self,
+        request: ForecastRequest,
+        *,
+        provider: str,
+        model: str,
+        error: str,
+        recorded_at: datetime,
+    ) -> bool:
+        if recorded_at.tzinfo is None or recorded_at.utcoffset() is None:
+            raise ValueError("recorded_at must be timezone-aware")
+        raw = f"{request.request_id}\x1f{provider}\x1f{model}".encode()
+        failure_id = hashlib.sha256(raw).hexdigest()[:24]
+        values = (
+            failure_id,
+            request.request_id,
+            provider,
+            model,
+            error,
+            recorded_at.isoformat(),
+        )
+        with self.connection:
+            self._ensure_request(request)
+            existing = self.connection.execute(
+                "SELECT * FROM forecast_failures WHERE failure_id = ?",
+                (failure_id,),
+            ).fetchone()
+            if existing is not None:
+                observed = (
+                    existing["failure_id"],
+                    existing["request_id"],
+                    existing["provider"],
+                    existing["model"],
+                    existing["error"],
+                    existing["recorded_at"],
+                )
+                if observed != values:
+                    raise ValueError(f"failure_id {failure_id!r} changed contents")
+                return False
+            self.connection.execute(
+                """
+                INSERT INTO forecast_failures (
+                    failure_id, request_id, provider, model, error, recorded_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 values,
             )
@@ -345,12 +412,20 @@ class ForecastJournal:
                 evidence_ids=tuple(item["evidence_id"] for item in evidence_rows),
                 baseline_probability=baseline,
                 rationale=row["rationale"],
-                metadata=tuple(
-                    sorted(json.loads(row["metadata_json"]).items())
-                ),
+                metadata=tuple(sorted(json.loads(row["metadata_json"]).items())),
             )
             results.append((forecast, bool(row["outcome_yes"])))
         return results
+
+    def request_count(self) -> int:
+        row = self.connection.execute("SELECT COUNT(*) AS n FROM requests").fetchone()
+        return int(row["n"])
+
+    def failure_count(self) -> int:
+        row = self.connection.execute(
+            "SELECT COUNT(*) AS n FROM forecast_failures"
+        ).fetchone()
+        return int(row["n"])
 
     def close(self) -> None:
         self.connection.close()
